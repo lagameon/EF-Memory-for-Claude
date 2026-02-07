@@ -8,7 +8,7 @@ Before contributing, you must understand and respect these principles:
 
 1. **Memory is project-level, not session-level**
 2. **No memory without evidence**
-3. **No persistence without human intent**
+3. **No persistence without human intent** — unless the user explicitly opts out via `human_review_required: false`
 4. **No silent enforcement**
 5. **Append-only > mutable truth**
 
@@ -43,7 +43,7 @@ Before contributing, you must understand and respect these principles:
 
 ## What we do NOT accept
 
-- Automatic file writes without human approval
+- Automatic file writes without human approval (note: `human_review_required: false` is an explicit user opt-out, not a violation)
 - Silent prompt injection
 - "AI decides what's important" features
 - Embedding-only storage (must have evidence)
