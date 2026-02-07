@@ -393,6 +393,70 @@ reasoning_check  → Cross-memory correlation, contradiction detection, synthesi
 
 All automation is idempotent and uses graceful degradation — embeddings fall back to FTS, reasoning falls back to heuristics, pipeline continues if a step fails.
 
+### Enabling Embedding (Vector Search)
+
+By default, embedding is disabled and search uses keyword-only mode (FTS5). To enable hybrid vector + keyword search:
+
+**1. Install a provider SDK** (pick one):
+
+```bash
+pip install google-genai    # Gemini (recommended — free tier, 768d)
+pip install openai          # OpenAI (1536d)
+pip install ollama          # Ollama (local, free, requires ollama server)
+```
+
+**2. Set API key** as environment variable:
+
+```bash
+export GOOGLE_API_KEY="your-key"    # For Gemini
+export OPENAI_API_KEY="your-key"    # For OpenAI
+# Ollama needs no API key — just run: ollama pull nomic-embed-text
+```
+
+**3. Enable in config** — set `embedding.enabled` to `true` in `.memory/config.json`:
+
+```json
+"embedding": {
+  "enabled": true,
+  "provider": "gemini",
+  "fallback": ["openai"]
+}
+```
+
+**4. Sync** to build the vector index:
+
+```bash
+python3 .memory/scripts/pipeline_cli.py --sync-only
+# Verify: python3 .memory/scripts/search_cli.py --debug "test query"
+# Output should show mode: "hybrid" instead of "keyword"
+```
+
+| Provider | SDK | API Key Env | Model | Dimensions | Cost |
+|----------|-----|-------------|-------|------------|------|
+| **Gemini** | `google-genai` | `GOOGLE_API_KEY` | `gemini-embedding-001` | 768 | Free tier available |
+| **OpenAI** | `openai` | `OPENAI_API_KEY` | `text-embedding-3-small` | 1536 | Paid |
+| **Ollama** | `ollama` | (none) | `nomic-embed-text` | 768 | Free (local) |
+
+The system tries the primary provider first, then walks the fallback chain. If all providers fail, it silently degrades to keyword-only mode.
+
+### Enabling LLM Reasoning
+
+To enable LLM-enriched reasoning (semantic correlations, deep contradiction analysis, principle synthesis):
+
+```bash
+export ANTHROPIC_API_KEY="your-key"   # or OPENAI_API_KEY / GOOGLE_API_KEY
+```
+
+```json
+"reasoning": {
+  "enabled": true,
+  "provider": "anthropic",
+  "fallback": ["openai", "gemini"]
+}
+```
+
+Without LLM, reasoning runs in heuristic-only mode (tag overlap, keyword opposition) at zero cost.
+
 ---
 
 ## Quick Start (3 Steps)
