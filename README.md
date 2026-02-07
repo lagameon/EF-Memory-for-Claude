@@ -190,7 +190,7 @@ Or tell Claude: **"turn off memory review"** / **"turn on memory review"**
 | `/memory-search` | Query existing memory | Never |
 | `/memory-verify` | Check integrity (static analysis) | Never |
 | `/memory-plan` | Working memory session management (V3) | `.memory/working/` session files |
-| `/memory-init` | Initialize auto-startup files (V3) | `CLAUDE.md`, `hooks.json`, `settings.local.json`, `.claude/rules/` |
+| `/memory-init` | Initialize auto-startup files (V3) | `CLAUDE.md`, `.claude/rules/`, `settings.local.json` (permissions + 5 hooks), `hooks.json` (legacy) |
 | `/memory-evolve` | Memory health & evolution analysis (V3) | Never (read-only report) |
 | `/memory-reason` | Cross-memory reasoning analysis (V3) | Never (read-only report) |
 
@@ -293,7 +293,7 @@ All reasoning functions are **advisory only** — they never modify events.jsonl
 EF Memory V3 adds automatic startup, working memory, and lifecycle automation:
 
 ### M7: Project Init & Auto-Startup
-One-command initialization generates all Claude Code integration files. Safe merge for existing projects — CLAUDE.md is appended (not overwritten), hooks.json and settings are merged.
+One-command initialization generates all Claude Code integration files. Safe merge for existing projects — CLAUDE.md is appended (not overwritten), settings.local.json merges permissions and hooks.
 
 ```bash
 python3 .memory/scripts/init_cli.py                    # Init current project
@@ -302,7 +302,7 @@ python3 .memory/scripts/init_cli.py --force             # Overwrite existing fil
 python3 .memory/scripts/init_cli.py --target /path/to   # Init another project
 ```
 
-Generated files: `CLAUDE.md` (EF Memory section), `.claude/rules/ef-memory-startup.md`, `.claude/hooks.json`, `.claude/settings.local.json`.
+Generated files: `CLAUDE.md` (EF Memory section), `.claude/rules/ef-memory-startup.md`, `.claude/settings.local.json` (permissions + 5 automation hooks), `.claude/hooks.json` (legacy pre-compact).
 
 ### M8: Working Memory (PWF Integration)
 Session-scoped working memory inspired by Planning with Files. Three markdown files (`task_plan.md`, `findings.md`, `progress.md`) in `.memory/working/` act as short-term RAM while EF Memory serves as long-term disk.

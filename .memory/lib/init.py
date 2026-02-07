@@ -182,7 +182,7 @@ def generate_hooks_settings() -> dict:
       - SessionStart: run startup health check
       - PreToolUse (Edit|Write): search memory for relevant entries
       - PreToolUse (EnterPlanMode): auto-start working memory session
-      - Stop: auto-harvest + persist + clear (or remind if disabled)
+      - Stop: auto-harvest working session (M9) OR scan conversation → drafts (M10)
       - PreCompact: remind to save before compacting
     """
     return {

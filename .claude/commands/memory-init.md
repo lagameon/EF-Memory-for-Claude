@@ -14,8 +14,8 @@ project, or re-run to update after configuration changes.
 |------|---------|----------------------|
 | `CLAUDE.md` | Tier 1 auto-load — session awareness | Appends EF Memory section (preserves existing content) |
 | `.claude/rules/ef-memory-startup.md` | Tier 2 auto-load — brief rule | Creates or overwrites (EFM-owned) |
-| `.claude/hooks.json` | Pre-compact reminder | Merges EF Memory hook (preserves other hooks) |
-| `.claude/settings.local.json` | Permission whitelist | Merges EFM permissions (preserves existing) |
+| `.claude/hooks.json` | Pre-compact reminder (legacy) | Merges EF Memory hook (preserves other hooks) |
+| `.claude/settings.local.json` | Permissions + **all 5 hooks** (SessionStart, PreToolUse:Edit\|Write, PreToolUse:EnterPlanMode, Stop, PreCompact) | Merges EFM permissions and hooks (preserves existing) |
 
 ---
 
@@ -49,10 +49,11 @@ python3 .memory/scripts/init_cli.py --target /path/to/project
 ### For existing projects (files already present)
 - **CLAUDE.md**: Appends EF Memory section at end with `---` separator.
   If EF Memory section already exists, skips (use `--force` to update).
-- **hooks.json**: Reads existing hooks, adds EF Memory `pre-compact` hook
-  if not present. Never duplicates.
-- **settings.local.json**: Reads existing permissions, merges EFM-specific
-  entries. Never removes existing permissions.
+- **hooks.json**: Reads existing hooks, adds EF Memory `pre-compact` message
+  hook if not present. Never duplicates. (Legacy — main hooks are in settings.local.json.)
+- **settings.local.json**: Merges EFM permissions (`Bash(python3:*)`, `Bash(bash:*)`)
+  **and all 5 automation hooks** (SessionStart, PreToolUse:Edit|Write, PreToolUse:EnterPlanMode,
+  Stop harvest/scan, PreCompact). Never removes existing permissions or hooks.
 - **ef-memory-startup.md**: Always written (EFM-owned file).
 
 ### Post-init scan
