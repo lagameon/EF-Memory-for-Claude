@@ -12,7 +12,7 @@ import math
 import hashlib
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 # Ensure .memory/ is on the import path so 'lib' is importable
 _MEMORY_DIR = Path(__file__).resolve().parent.parent
@@ -142,3 +142,123 @@ class MockEmbedder:
         if norm > 0:
             vec = [v / norm for v in vec]
         return vec
+
+
+# ---------------------------------------------------------------------------
+# Mock LLM Provider (M6)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _LLMResponse:
+    """Mirrors lib.llm_provider.LLMResponse for test independence."""
+    text: str
+    model: str
+    provider: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class MockLLMProvider:
+    """Mock LLM provider for testing (returns canned responses by keyword)."""
+
+    def __init__(self, responses: Optional[Dict[str, str]] = None):
+        self._responses = responses or {}
+        self._default_response = '{"result": "mock analysis"}'
+        self._call_count = 0
+        self._calls: List[Tuple[str, str]] = []
+
+    @property
+    def provider_id(self) -> str:
+        return "mock"
+
+    @property
+    def model_name(self) -> str:
+        return "mock-llm-v1"
+
+    def complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+    ) -> _LLMResponse:
+        self._call_count += 1
+        self._calls.append((system_prompt, user_prompt))
+        # Match response by keyword in user_prompt
+        for keyword, response_text in self._responses.items():
+            if keyword.lower() in user_prompt.lower():
+                text = response_text
+                break
+        else:
+            text = self._default_response
+        return _LLMResponse(
+            text=text,
+            model="mock-llm-v1",
+            provider="mock",
+            input_tokens=len(user_prompt.split()),
+            output_tokens=len(text.split()),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Extended sample entries for M6 reasoning tests
+# ---------------------------------------------------------------------------
+
+SAMPLE_ENTRIES_EXTENDED = SAMPLE_ENTRIES + [
+    {
+        "id": "lesson-deploy01-1a2b3c4d",
+        "type": "lesson",
+        "classification": "hard",
+        "severity": "S2",
+        "title": "Rolling window must use shift before pct_change in deployment pipeline",
+        "content": [
+            "Deployment pipeline had same shift-before-rolling bug",
+            "Caught during staging review",
+        ],
+        "rule": "shift(1) MUST precede pct_change() in deployment feature generation",
+        "implication": "Deployment predictions would be invalid without shift",
+        "source": ["deployment/feature_gen.py:L45-L60"],
+        "tags": ["leakage", "shift", "deployment", "rolling"],
+        "created_at": "2026-02-02T10:00:00Z",
+        "last_verified": "2026-02-05T09:00:00Z",
+        "deprecated": False,
+        "_meta": {},
+    },
+    {
+        "id": "rule-cache01-5e6f7a8b",
+        "type": "rule",
+        "classification": "hard",
+        "severity": "S2",
+        "title": "Cache TTL must be explicitly set for all API responses",
+        "content": [
+            "Default cache TTL caused stale predictions served to users",
+            "Must set TTL on every cache.set() call",
+        ],
+        "rule": "Every cache.set() call MUST include explicit ttl parameter",
+        "implication": "Stale data served to users; incorrect trading signals",
+        "source": ["src/api/cache.py:L30-L55"],
+        "tags": ["cache", "api", "ttl"],
+        "created_at": "2026-02-03T11:00:00Z",
+        "last_verified": None,
+        "deprecated": False,
+        "_meta": {},
+    },
+    {
+        "id": "lesson-contra01-9c0d1e2f",
+        "type": "lesson",
+        "classification": "soft",
+        "severity": "S3",
+        "title": "Never apply shift before rolling window calculations",
+        "content": [
+            "Initial implementation applied shift before rolling",
+            "This caused look-ahead bias in a different way",
+        ],
+        "rule": "NEVER apply shift(1) before rolling() — shift must come after",
+        "implication": "Different form of data leakage through premature shifting",
+        "source": ["src/features/engine.py:L100-L120"],
+        "tags": ["leakage", "shift", "rolling", "feature-engine"],
+        "created_at": "2025-06-15T08:00:00Z",
+        "last_verified": None,
+        "deprecated": False,
+        "_meta": {},
+    },
+]

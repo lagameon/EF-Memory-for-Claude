@@ -35,6 +35,9 @@ Before contributing, you must understand and respect these principles:
 - New verification checks for `/memory-verify`
 - Support for additional document formats
 - Tooling improvements
+- New LLM provider integrations for reasoning layer
+- Search engine enhancements
+- Evolution heuristic improvements
 
 ---
 
@@ -45,6 +48,7 @@ Before contributing, you must understand and respect these principles:
 - "AI decides what's important" features
 - Embedding-only storage (must have evidence)
 - Breaking changes to the schema without migration path
+- Auto-modifying events.jsonl from reasoning/evolution outputs (advisory only)
 
 ---
 
@@ -73,9 +77,25 @@ git checkout -b feature/your-feature-name
 
 ### 4. Test locally
 
-- Verify commands work with Claude Code CLI
-- Check that examples are valid
-- Validate JSON schema if touching storage
+```bash
+# Run the full test suite (407 tests)
+python3 -m unittest discover -s .memory/tests -v
+
+# Validate config files
+python3 -m json.tool .memory/config.json > /dev/null
+python3 -m json.tool .memory/config.schema.json > /dev/null
+
+# Test CLI scripts
+python3 .memory/scripts/reasoning_cli.py --help
+python3 .memory/scripts/search_cli.py --help
+python3 .memory/scripts/evolution_cli.py --help
+python3 .memory/scripts/pipeline_cli.py --help
+
+# Verify commands work with Claude Code CLI
+# Check that examples are valid
+```
+
+**Important**: All 407 tests must pass before submitting. Do not reduce test count.
 
 ### 5. Submit PR
 

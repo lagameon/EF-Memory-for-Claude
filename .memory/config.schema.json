@@ -212,7 +212,7 @@
         },
         "pipeline_steps": {
           "type": "array",
-          "items": {"type": "string", "enum": ["sync_embeddings", "generate_rules", "evolution_check"]},
+          "items": {"type": "string", "enum": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check"]},
           "default": ["sync_embeddings", "generate_rules"],
           "description": "Ordered pipeline steps to run"
         },
@@ -286,6 +286,95 @@
             "verification_boost":  {"type": "number", "default": 0.15},
             "source_validity":     {"type": "number", "default": 0.25}
           }
+        }
+      }
+    },
+    "reasoning": {
+      "type": "object",
+      "description": "M6 LLM Reasoning Layer configuration. Optional — system works without it (heuristic-only mode).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable LLM reasoning layer. When false, reasoning functions use heuristic-only mode."
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["anthropic", "openai", "gemini", "ollama"],
+          "default": "anthropic",
+          "description": "Primary LLM provider for reasoning"
+        },
+        "fallback": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["anthropic", "openai", "gemini", "ollama"]},
+          "description": "Fallback LLM providers if primary fails"
+        },
+        "providers": {
+          "type": "object",
+          "description": "Per-provider LLM configuration",
+          "properties": {
+            "anthropic": {
+              "type": "object",
+              "properties": {
+                "model": {"type": "string", "default": "claude-sonnet-4-20250514"},
+                "api_key_env": {"type": "string", "default": "ANTHROPIC_API_KEY"}
+              }
+            },
+            "openai": {
+              "type": "object",
+              "properties": {
+                "model": {"type": "string", "default": "gpt-4o-mini"},
+                "api_key_env": {"type": "string", "default": "OPENAI_API_KEY"}
+              }
+            },
+            "gemini": {
+              "type": "object",
+              "properties": {
+                "model": {"type": "string", "default": "gemini-2.0-flash"},
+                "api_key_env": {"type": "string", "default": "GOOGLE_API_KEY"}
+              }
+            },
+            "ollama": {
+              "type": "object",
+              "properties": {
+                "model": {"type": "string", "default": "llama3.1"},
+                "host": {"type": "string", "default": "http://localhost:11434"}
+              }
+            }
+          }
+        },
+        "max_tokens": {
+          "type": "integer",
+          "default": 4096,
+          "minimum": 256,
+          "maximum": 32768,
+          "description": "Maximum output tokens per LLM call"
+        },
+        "correlation_threshold": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Minimum tag overlap count to consider entries correlated"
+        },
+        "contradiction_detection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable contradiction detection in reasoning analysis"
+        },
+        "synthesis_min_group_size": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 2,
+          "maximum": 10,
+          "description": "Minimum entries in a cluster to suggest synthesis"
+        },
+        "token_budget": {
+          "type": "integer",
+          "default": 16000,
+          "minimum": 1000,
+          "maximum": 128000,
+          "description": "Total input character budget for LLM prompts (controls entry serialization truncation)"
         }
       }
     }

@@ -47,25 +47,32 @@ This system solves that by enforcing:
                     ┌──────────────────────────────────────────────┐
                     │            EF Memory V2 Runtime               │
                     │                                              │
-  Event Sources      │   Layer 2: Semantic Retrieval                │
-  ─────────────     │   ├── Embedding (Gemini / OpenAI / Ollama)   │
-  · file edit       │   ├── BM25 full-text search (FTS5)           │
-  · test fail/pass  │   └── Hybrid search + Re-rank                │
-  · git commit      │                                              │
-  · manual /cmd     │   Layer 1: Structured Rules                  │
-       │            │   ├── .claude/rules/ Bridge (auto-inject)    │
-       ▼            │   └── Hard entries → domain rule files       │
-  ┌─────────┐       │                                              │
-  │ Drafts  │──────▶│   Storage: events.jsonl (source of truth)    │
-  │ (queue) │       │   Index:   vectors.db (SQLite, derived)      │
-  └─────────┘       │   Cache:   .claude/rules/ef-memory/ (derived)│
-       │            └──────────────────────────────────────────────┘
-       │ human
-       │ approval    Automation Engine:
-       ▼            ├── Auto-Verify:  schema + source drift detection
-  events.jsonl      ├── Auto-Capture: event → draft queue → approval
+  Event Sources      │   Layer 3: LLM Reasoning                    │
+  ─────────────     │   ├── Cross-memory correlation               │
+  · file edit       │   ├── Contradiction detection                │
+  · test fail/pass  │   ├── Knowledge synthesis                    │
+  · git commit      │   └── Context-aware risk assessment          │
+  · manual /cmd     │                                              │
+       │            │   Layer 2: Semantic Retrieval                │
+       │            │   ├── Embedding (Gemini / OpenAI / Ollama)   │
+       │            │   ├── BM25 full-text search (FTS5)           │
+       │            │   └── Hybrid search + Re-rank                │
+       ▼            │                                              │
+  ┌─────────┐       │   Layer 1: Structured Rules                  │
+  │ Drafts  │──────▶│   ├── .claude/rules/ Bridge (auto-inject)    │
+  │ (queue) │       │   └── Hard entries → domain rule files       │
+  └─────────┘       │                                              │
+       │            │   Storage: events.jsonl (source of truth)    │
+       │ human      │   Index:   vectors.db (SQLite, derived)      │
+       │ approval   │   Cache:   .claude/rules/ef-memory/ (derived)│
+       ▼            └──────────────────────────────────────────────┘
+  events.jsonl
+                    Automation Engine:
+                    ├── Auto-Verify:  schema + source drift detection
+                    ├── Auto-Capture: event → draft queue → approval
                     ├── Auto-Sync:    events.jsonl → vectors.db + FTS
-                    └── Auto-Evolve:  dedup / confidence decay / deprecation
+                    ├── Auto-Evolve:  dedup / confidence decay / deprecation
+                    └── Auto-Reason:  LLM correlation / contradiction / synthesis
 ```
 
 ### Three-Layer Retrieval (4-Level Degradation)
@@ -148,7 +155,7 @@ This system will ALWAYS:
 
 ## V2 Capabilities
 
-EF Memory V2 adds five milestones of infrastructure on top of the core template:
+EF Memory V2 adds six milestones of infrastructure on top of the core template:
 
 ### M1: Embedding Layer
 Multi-provider embedding support (Gemini, OpenAI, Ollama) with SQLite vector storage, FTS5 full-text index, and incremental sync engine.
@@ -205,6 +212,36 @@ score = 0.30 × source_quality + 0.30 × age_decay + 0.15 × verification_boost 
 ```
 
 All evolution functions are **advisory only** — they never modify events.jsonl.
+
+### M6: LLM Reasoning Layer
+Cross-memory correlation, contradiction detection, knowledge synthesis, and context-aware risk assessment. Multi-provider LLM support (Anthropic Claude, OpenAI GPT, Google Gemini, Ollama) with automatic heuristic fallback.
+
+```bash
+python3 .memory/scripts/reasoning_cli.py                    # Full reasoning report
+python3 .memory/scripts/reasoning_cli.py --correlations      # Cross-memory correlations
+python3 .memory/scripts/reasoning_cli.py --contradictions    # Contradiction detection
+python3 .memory/scripts/reasoning_cli.py --syntheses         # Knowledge synthesis
+python3 .memory/scripts/reasoning_cli.py --risks "query"     # Context-aware risk assessment
+python3 .memory/scripts/reasoning_cli.py --no-llm            # Force heuristic-only mode
+python3 .memory/scripts/search_cli.py --annotate "leakage"   # Search with risk annotations
+```
+
+**Two-stage architecture:**
+```
+Stage 1 — Heuristic (zero LLM cost):
+  ├── Tag overlap → correlation groups
+  ├── MUST/NEVER keyword opposition → contradiction candidates
+  ├── Tag clustering → synthesis candidates
+  └── Staleness/confidence → risk annotations
+
+Stage 2 — LLM Enrichment (optional):
+  ├── Semantic correlation discovery
+  ├── Deep contradiction analysis
+  ├── Principle text generation
+  └── Context-aware risk explanation
+```
+
+All reasoning functions are **advisory only** — they never modify events.jsonl. Without LLM provider SDKs, the system automatically degrades to heuristic-only mode.
 
 ---
 
@@ -266,7 +303,7 @@ cp archetypes/quant/memory.config.patch.json .memory/
 ```json
 {
   "$schema": "./config.schema.json",
-  "version": "1.3",
+  "version": "1.4",
 
   "paths": {
     "CODE_ROOTS": ["src/"],
@@ -295,6 +332,14 @@ cp archetypes/quant/memory.config.patch.json .memory/
   "evolution": {
     "confidence_half_life_days": 120,
     "deprecation_confidence_threshold": 0.3
+  },
+
+  "reasoning": {
+    "enabled": false,
+    "provider": "anthropic",
+    "fallback": ["openai", "gemini"],
+    "max_tokens": 4096,
+    "token_budget": 16000
   }
 }
 ```
@@ -316,7 +361,7 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 ```
 .memory/
 ├── SCHEMA.md              # Storage contract (v1.0)
-├── config.json            # Project configuration (v1.3)
+├── config.json            # Project configuration (v1.4)
 ├── config.schema.json     # JSON Schema for config
 ├── events.jsonl           # Memory storage (append-only)
 ├── vectors.db             # Vector + FTS5 index (derived, gitignored)
@@ -333,7 +378,10 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 │   ├── auto_verify.py     #   Schema/source/staleness/dedup validation
 │   ├── auto_capture.py    #   Draft queue management
 │   ├── auto_sync.py       #   Pipeline orchestration
-│   └── evolution.py       #   Memory health & lifecycle (M5)
+│   ├── evolution.py       #   Memory health & lifecycle (M5)
+│   ├── llm_provider.py    #   Multi-provider LLM abstraction (M6)
+│   ├── prompts.py         #   LLM prompt templates (M6)
+│   └── reasoning.py       #   LLM reasoning engine (M6)
 ├── scripts/               # CLI entry points
 │   ├── sync_embeddings.py
 │   ├── search_cli.py
@@ -341,8 +389,9 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 │   ├── verify_cli.py
 │   ├── capture_cli.py
 │   ├── pipeline_cli.py
-│   └── evolution_cli.py
-└── tests/                 # 256 unit tests
+│   ├── evolution_cli.py
+│   └── reasoning_cli.py
+└── tests/                 # 407 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -352,7 +401,9 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
     ├── test_auto_verify.py
     ├── test_auto_capture.py
     ├── test_auto_sync.py
-    └── test_evolution.py
+    ├── test_evolution.py
+    ├── test_llm_provider.py
+    └── test_reasoning.py
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
@@ -450,6 +501,6 @@ MIT — see [LICENSE](LICENSE).
 | Component | Version |
 |-----------|---------|
 | Schema | 1.0 |
-| Config | 1.3 |
+| Config | 1.4 |
 | Commands | 1.1 |
-| V2 Engine | M5 (256 tests) |
+| V2 Engine | M6 (407 tests) |

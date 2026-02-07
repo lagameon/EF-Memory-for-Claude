@@ -4,6 +4,111 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-07 — v1.4 M6: LLM Reasoning Layer
+
+### M6: Layer 3 LLM Reasoning Engine
+
+Cross-memory correlation, contradiction detection, knowledge synthesis, and context-aware risk assessment — powered by multi-provider LLM abstraction with automatic heuristic fallback.
+
+**New files (6):**
+- `.memory/lib/llm_provider.py` — Multi-provider LLM abstraction (Anthropic/OpenAI/Gemini/Ollama)
+- `.memory/lib/prompts.py` — Centralized LLM prompt templates
+- `.memory/lib/reasoning.py` — Core reasoning engine (5 analysis functions)
+- `.memory/scripts/reasoning_cli.py` — CLI for reasoning analysis
+- `.memory/tests/test_llm_provider.py` — 21 tests
+- `.memory/tests/test_reasoning.py` — 61 tests
+
+**Modified files (7):**
+- `.memory/tests/conftest.py` — Added MockLLMProvider + SAMPLE_ENTRIES_EXTENDED
+- `.memory/config.json` — Added `reasoning` section (v1.3 → v1.4)
+- `.memory/config.schema.json` — Added reasoning schema + `reasoning_check` pipeline step
+- `.memory/lib/search.py` — Added `reasoning_annotations` field to SearchReport
+- `.memory/scripts/search_cli.py` — Added `--annotate` flag for risk annotations
+- `.memory/lib/auto_sync.py` — Added `reasoning_check` pipeline step
+- `.memory/tests/test_search.py` + `.memory/tests/test_auto_sync.py` — 10 new integration tests
+
+**Key features:**
+- Two-stage architecture: heuristic pre-filter (zero LLM cost) + optional LLM enrichment
+- Four providers: Anthropic Claude, OpenAI GPT, Google Gemini, Ollama (all optional, lazy import)
+- Fallback chain with graceful degradation (LLM unavailable → heuristic-only mode)
+- Cross-memory correlation (tag overlap, source overlap, temporal proximity)
+- Contradiction detection (opposing keywords MUST/NEVER, severity mismatch)
+- Knowledge synthesis (tag-based clustering → principle generation)
+- Risk assessment (staleness, superseded entries, confidence-based annotations)
+- Search integration via `--annotate` flag
+- Pipeline integration via `reasoning_check` step
+
+**Test count: 315 → 407** (+92 new tests, 0 failures)
+
+---
+
+## 2026-02-05 — Comprehensive Audit
+
+### P0-P3 Four-Layer Audit
+
+Systematic audit of M1-M5 codebase, fixing 36 bugs across 4 priority layers.
+
+- **P0 (Critical)**: 8 fixes — data loss prevention, crash fixes, import/config errors
+- **P1 (Correctness)**: 12 fixes — logic bugs, scoring errors, boundary conditions
+- **P2 (Robustness)**: 10 fixes — error handling, edge cases, graceful degradation
+- **P3 (Quality)**: 6 fixes — code style, test coverage, minor improvements
+
+**Test count: 256 → 315** (+59 tests from audit hardening)
+
+---
+
+## 2026-02-04 — v1.3 M5: Memory Evolution
+
+### M5: Memory Health & Lifecycle Management
+
+- Duplicate detection with Union-Find clustering (text + optional embedding hybrid)
+- Confidence scoring model (source quality × age decay × verification × validity)
+- Deprecation suggestions based on confidence threshold
+- Merge recommendations from duplicate groups
+- Evolution CLI with `--duplicates`, `--confidence`, `--deprecations`, `--merges`
+- Pipeline integration via `evolution_check` step
+- Config v1.2 → v1.3
+
+**Test count: 216 → 256** (+40 tests)
+
+---
+
+## 2026-02-03 — v1.2 M4: Automation Engine
+
+### M4: Auto-Verify + Auto-Capture + Auto-Sync
+
+- Schema validation (core-001 to core-014 rules, programmatic)
+- Source verification (file existence, line ranges, git commits, markdown anchors)
+- Draft queue with human-in-the-loop approval workflow
+- Pipeline orchestration (sync + rules steps, isolated failure handling)
+- Startup health check (<100ms, source spot-checking)
+- Three CLI scripts: verify_cli.py, capture_cli.py, pipeline_cli.py
+
+**Test count: 102 → 216** (+114 tests)
+
+---
+
+## 2026-02-02 — v1.1 M1-M3: Foundation + Search + Auto-Inject
+
+### M1: Embedding Layer
+- Multi-provider embedding (Gemini, OpenAI, Ollama) with factory + fallback
+- SQLite vector storage + FTS5 full-text index
+- Incremental sync engine with text-hash change detection
+
+### M2: Hybrid Search Engine
+- BM25 + Vector fusion with 4-level graceful degradation
+- Classification/severity re-rank boost
+- Search CLI with `--debug`, `--full`, `--mode` options
+
+### M3: Layer 1 Auto-Inject
+- Hard entries → `.claude/rules/ef-memory/*.md` automatic generation
+- Domain extraction from source paths
+- Dry-run and clean modes
+
+**Test count: 0 → 102** (38 + 32 + 32)
+
+---
+
 ## 2026-02-01 — v1.1 Template Release
 
 ### Template Repository

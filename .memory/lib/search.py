@@ -58,6 +58,7 @@ class SearchReport:
     degraded: bool = False    # Whether degradation occurred
     degradation_reason: str = ""
     duration_ms: float = 0.0
+    reasoning_annotations: Optional[List[dict]] = None  # M6 risk annotations
 
 
 # ---------------------------------------------------------------------------

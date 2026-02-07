@@ -2,7 +2,7 @@
 EF Memory V2 — Auto-Sync (Pipeline Orchestration)
 
 Orchestrates the automation pipeline:
-  - run_pipeline: sync embeddings + generate rules + evolution check (steps are isolated)
+  - run_pipeline: sync embeddings + generate rules + evolution check + reasoning check
   - check_startup: lightweight health check for session start
 
 Reuses existing modules:
@@ -11,6 +11,7 @@ Reuses existing modules:
   - auto_verify.check_staleness, verify_source (M4.1)
   - auto_capture.list_drafts (M4.2)
   - evolution.build_evolution_report (M5)
+  - reasoning.build_reasoning_report (M6)
 
 No external dependencies — pure Python stdlib + internal modules.
 """
@@ -40,7 +41,7 @@ logger = logging.getLogger("efm.auto_sync")
 @dataclass
 class StepResult:
     """Result of a single pipeline step."""
-    step: str = ""               # "sync_embeddings" | "generate_rules" | "evolution_check"
+    step: str = ""               # "sync_embeddings" | "generate_rules" | "evolution_check" | "reasoning_check"
     success: bool = True
     skipped: bool = False
     skip_reason: str = ""
@@ -87,6 +88,7 @@ def run_pipeline(
         "sync_embeddings"  — sync events.jsonl -> vectors.db (FTS + optional vectors)
         "generate_rules"   — regenerate .claude/rules/ef-memory/*.md from Hard entries
         "evolution_check"  — run evolution report (duplicates, confidence, deprecations)
+        "reasoning_check"  — run LLM reasoning report (correlations, contradictions, synthesis)
 
     Each step is isolated: failure in one doesn't block others.
     Embedding disabled → sync still updates FTS index.
@@ -110,6 +112,8 @@ def run_pipeline(
             result = _run_rules_step(events_path, config, project_root)
         elif step_name == "evolution_check":
             result = _run_evolution_step(events_path, config, project_root)
+        elif step_name == "reasoning_check":
+            result = _run_reasoning_step(events_path, config, project_root)
         else:
             result = StepResult(
                 step=step_name,
@@ -266,6 +270,53 @@ def _run_evolution_step(
         result.success = False
         result.error = str(e)
         logger.error(f"evolution_check step failed: {e}")
+
+    return result
+
+
+def _run_reasoning_step(
+    events_path: Path,
+    config: dict,
+    project_root: Path,
+) -> StepResult:
+    """Run the reasoning_check step (M6 LLM reasoning analysis)."""
+    result = StepResult(step="reasoning_check")
+
+    try:
+        from .reasoning import build_reasoning_report
+        from .llm_provider import create_llm_provider
+
+        # Optionally create LLM provider
+        llm_provider = None
+        reasoning_config = config.get("reasoning", {})
+        if reasoning_config.get("enabled", False):
+            try:
+                llm_provider = create_llm_provider(reasoning_config)
+            except Exception as e:
+                logger.warning(f"LLM provider not available: {e}")
+
+        reasoning_report = build_reasoning_report(
+            events_path=events_path,
+            config=config,
+            project_root=project_root,
+            llm_provider=llm_provider,
+        )
+
+        result.success = True
+        result.details = {
+            "total_entries": reasoning_report.total_entries,
+            "mode": reasoning_report.mode,
+            "llm_calls": reasoning_report.llm_calls,
+            "llm_tokens_used": reasoning_report.llm_tokens_used,
+            "correlation_groups": len(reasoning_report.correlation_report.groups) if reasoning_report.correlation_report else 0,
+            "contradiction_pairs": len(reasoning_report.contradiction_report.pairs) if reasoning_report.contradiction_report else 0,
+            "synthesis_suggestions": len(reasoning_report.synthesis_report.suggestions) if reasoning_report.synthesis_report else 0,
+        }
+
+    except Exception as e:
+        result.success = False
+        result.error = str(e)
+        logger.error(f"reasoning_check step failed: {e}")
 
     return result
 

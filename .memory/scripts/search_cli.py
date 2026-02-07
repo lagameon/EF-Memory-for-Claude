@@ -10,6 +10,7 @@ Usage:
     python3 .memory/scripts/search_cli.py "label" --mode keyword
     python3 .memory/scripts/search_cli.py "shift" --full
     python3 .memory/scripts/search_cli.py --debug "leakage"
+    python3 .memory/scripts/search_cli.py --annotate "leakage"   # Add risk annotations (M6)
     python3 .memory/scripts/search_cli.py --help
 
 Modes:
@@ -43,6 +44,7 @@ def _parse_args(argv: list) -> dict:
         "mode": None,
         "full": False,
         "debug": False,
+        "annotate": False,
         "help": False,
     }
 
@@ -56,6 +58,8 @@ def _parse_args(argv: list) -> dict:
             args["full"] = True
         elif arg == "--debug":
             args["debug"] = True
+        elif arg == "--annotate":
+            args["annotate"] = True
         elif arg == "--max-results" and i + 1 < len(argv):
             i += 1
             try:
@@ -258,9 +262,38 @@ def main():
         force_mode=args["mode"],
     )
 
+    # Risk annotations (M6)
+    if args["annotate"] and report.results:
+        try:
+            from lib.reasoning import annotate_search_results
+            from lib.auto_verify import _load_entries_latest_wins
+            from lib.llm_provider import create_llm_provider
+
+            entries = _load_entries_latest_wins(events_path)
+            reasoning_config = config.get("reasoning", {})
+            llm_prov = None
+            if reasoning_config.get("enabled", False):
+                llm_prov = create_llm_provider(reasoning_config)
+
+            annotations = annotate_search_results(
+                report.results, entries, config,
+                llm_provider=llm_prov, query=report.query,
+            )
+            report.reasoning_annotations = annotations
+        except Exception as e:
+            logging.warning(f"Reasoning annotation failed: {e}")
+
     # Format and display
     output = _format_report(report, full=args["full"], debug=args["debug"])
     print(output)
+
+    # Display annotations if present
+    if report.reasoning_annotations:
+        print("\nRisk Annotations:")
+        level_icons = {"high": "!!", "medium": "! ", "low": "~ ", "info": "i "}
+        for ann in report.reasoning_annotations:
+            icon = level_icons.get(ann.get("risk_level", ""), "? ")
+            print(f"  [{icon}] {ann.get('entry_id', '?')}: {ann.get('annotation', '')}")
 
     # Cleanup
     if vectordb:

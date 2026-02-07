@@ -538,5 +538,99 @@ class TestConfigMaxResults(SearchTestBase):
         self.assertLessEqual(report.total_found, 1)
 
 
+# ---------------------------------------------------------------------------
+# M6 Integration: SearchReport reasoning_annotations field
+# ---------------------------------------------------------------------------
+
+class TestSearchReportReasoningAnnotations(unittest.TestCase):
+    """Tests for the M6 reasoning_annotations field on SearchReport."""
+
+    def test_default_is_none(self):
+        from lib.search import SearchReport
+        report = SearchReport(query="test", mode="basic")
+        self.assertIsNone(report.reasoning_annotations)
+
+    def test_can_set_annotations(self):
+        from lib.search import SearchReport
+        report = SearchReport(query="test", mode="basic")
+        report.reasoning_annotations = [
+            {"entry_id": "abc", "risk_level": "medium", "annotation": "old entry"},
+        ]
+        self.assertEqual(len(report.reasoning_annotations), 1)
+        self.assertEqual(report.reasoning_annotations[0]["risk_level"], "medium")
+
+    def test_backward_compatible(self):
+        """Existing code that doesn't use reasoning_annotations should not break."""
+        from lib.search import SearchReport, SearchResult
+        report = SearchReport(query="test", mode="basic")
+        # Access all existing fields — no error
+        _ = report.query
+        _ = report.mode
+        _ = report.total_found
+        _ = report.results
+        _ = report.degraded
+        _ = report.degradation_reason
+        _ = report.duration_ms
+        # New field should be accessible
+        _ = report.reasoning_annotations
+
+    def test_annotate_search_results_integration(self):
+        """annotate_search_results should return list of dicts for SearchReport."""
+        from lib.reasoning import annotate_search_results
+
+        entries = {
+            "old": {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00Z",
+                "last_verified": None,
+                "tags": [],
+                "source": [],
+                "_meta": {},
+            },
+        }
+
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            entry_id: str
+
+        results = [_FakeResult(entry_id="old")]
+        config = {"reasoning": {"enabled": True}}
+        annotations = annotate_search_results(results, entries, config)
+        self.assertIsInstance(annotations, list)
+        if annotations:
+            self.assertIsInstance(annotations[0], dict)
+            self.assertIn("entry_id", annotations[0])
+
+    def test_empty_annotations_for_fresh_entries(self):
+        """Fresh entries should not get risk annotations."""
+        from lib.reasoning import annotate_search_results
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            entry_id: str
+
+        entries = {
+            "fresh": {
+                "id": "fresh",
+                "created_at": "2026-02-07T00:00:00Z",
+                "last_verified": "2026-02-07T00:00:00Z",
+                "tags": [],
+                "source": [],
+                "_meta": {},
+                "classification": "soft",
+            },
+        }
+        results = [_FakeResult(entry_id="fresh")]
+        config = {"reasoning": {"enabled": True}}
+        annotations = annotate_search_results(results, entries, config)
+        # Fresh soft entries may still get annotations (e.g., info level), or none
+        # The key guarantee: no high/medium annotations for fresh entries
+        for ann in annotations:
+            self.assertNotIn(ann.get("risk_level"), ("high", "medium"))
+
+
 if __name__ == "__main__":
     unittest.main()

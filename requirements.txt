@@ -1,8 +1,20 @@
-# EF Memory V2 — Embedding Layer
-# Base: Python 3.11+ stdlib only (json, sqlite3, struct, math, hashlib)
+# EF Memory V2 — Dependencies
+# Base: Python 3.11+ stdlib only (json, sqlite3, struct, math, hashlib, difflib)
 # No mandatory external dependencies.
 #
-# Install the provider SDK you need:
+# Install the provider SDKs you need:
+#
+# --- Embedding providers (M1) ---
 #   pip install google-genai      # Gemini embeddings (primary)
 #   pip install openai             # OpenAI embeddings
 #   pip install ollama             # Ollama local embeddings
+#
+# --- LLM providers for reasoning (M6) ---
+#   pip install anthropic          # Anthropic Claude (primary for reasoning)
+#   pip install openai             # OpenAI GPT (also used for reasoning)
+#   pip install google-genai       # Google Gemini (also used for reasoning)
+#   pip install ollama             # Ollama local LLMs (also used for reasoning)
+#
+# All SDKs are optional — the system gracefully degrades:
+#   - Without embedding SDKs: search falls back to keyword/basic mode
+#   - Without LLM SDKs: reasoning uses heuristic-only mode

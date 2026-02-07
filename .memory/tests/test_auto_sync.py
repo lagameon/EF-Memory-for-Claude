@@ -384,5 +384,89 @@ class TestStartupWithDeprecated(unittest.TestCase):
         self.assertEqual(report.total_entries, 1)  # Only active
 
 
+# ---------------------------------------------------------------------------
+# TestReasoningStep (M6 integration)
+# ---------------------------------------------------------------------------
+
+class TestReasoningStep(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.events_path = self.tmpdir / "events.jsonl"
+        self.config = _make_config()
+        self.config["reasoning"] = {
+            "enabled": False,
+            "correlation_threshold": 2,
+            "synthesis_min_group_size": 3,
+        }
+
+    def test_reasoning_step_runs(self):
+        now = datetime.now(timezone.utc).isoformat()
+        entry = _make_valid_entry(created_at=now, source=["PR #123"])
+        self.events_path.write_text(json.dumps(entry) + "\n")
+
+        report = run_pipeline(
+            self.events_path, self.config, self.tmpdir,
+            steps=["reasoning_check"],
+        )
+        self.assertEqual(report.steps_run, 1)
+        result = report.step_results[0]
+        self.assertEqual(result.step, "reasoning_check")
+        self.assertTrue(result.success)
+        self.assertIn("total_entries", result.details)
+        self.assertIn("mode", result.details)
+        self.assertEqual(result.details["mode"], "heuristic")
+
+    def test_reasoning_step_empty_events(self):
+        self.events_path.write_text("")
+        report = run_pipeline(
+            self.events_path, self.config, self.tmpdir,
+            steps=["reasoning_check"],
+        )
+        self.assertTrue(report.step_results[0].success)
+        self.assertEqual(report.step_results[0].details["total_entries"], 0)
+
+    def test_reasoning_step_details_structure(self):
+        now = datetime.now(timezone.utc).isoformat()
+        entry = _make_valid_entry(created_at=now, source=["PR #123"])
+        self.events_path.write_text(json.dumps(entry) + "\n")
+
+        report = run_pipeline(
+            self.events_path, self.config, self.tmpdir,
+            steps=["reasoning_check"],
+        )
+        details = report.step_results[0].details
+        self.assertIn("correlation_groups", details)
+        self.assertIn("contradiction_pairs", details)
+        self.assertIn("synthesis_suggestions", details)
+        self.assertIn("llm_calls", details)
+        self.assertEqual(details["llm_calls"], 0)
+
+    def test_reasoning_not_in_default_steps(self):
+        """reasoning_check should NOT be in default pipeline steps."""
+        self.events_path.write_text("")
+        report = run_pipeline(self.events_path, self.config, self.tmpdir)
+        step_names = [r.step for r in report.step_results]
+        self.assertNotIn("reasoning_check", step_names)
+
+    def test_reasoning_with_multiple_entries(self):
+        now = datetime.now(timezone.utc).isoformat()
+        entries = [
+            _make_valid_entry(id="lesson-a-11111111", created_at=now, source=["PR #1"]),
+            _make_valid_entry(id="lesson-b-22222222", created_at=now, source=["PR #2"],
+                              title="Different lesson about testing"),
+        ]
+        with open(self.events_path, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+
+        report = run_pipeline(
+            self.events_path, self.config, self.tmpdir,
+            steps=["reasoning_check"],
+        )
+        self.assertTrue(report.step_results[0].success)
+        self.assertEqual(report.step_results[0].details["total_entries"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
