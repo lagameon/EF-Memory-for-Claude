@@ -1,6 +1,6 @@
 {
   "$schema": "./config.schema.json",
-  "version": "1.4",
+  "version": "1.5",
 
   "embedding": {
     "enabled": false,
@@ -128,5 +128,13 @@
     "contradiction_detection": true,
     "synthesis_min_group_size": 3,
     "token_budget": 16000
+  },
+
+  "v3": {
+    "auto_startup": true,
+    "working_memory_dir": ".memory/working",
+    "harvest_on_compact": true,
+    "prefill_on_plan_start": true,
+    "max_prefill_entries": 5
   }
 }

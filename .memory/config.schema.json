@@ -390,6 +390,39 @@
           "description": "Total input character budget for LLM prompts (controls entry serialization truncation)"
         }
       }
+    },
+    "v3": {
+      "type": "object",
+      "description": "V3 Auto-Startup and Working Memory configuration",
+      "properties": {
+        "auto_startup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable auto-startup file generation via /memory-init"
+        },
+        "working_memory_dir": {
+          "type": "string",
+          "default": ".memory/working",
+          "description": "Directory for working memory session files (gitignored)"
+        },
+        "harvest_on_compact": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt memory harvest before context compaction"
+        },
+        "prefill_on_plan_start": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pre-fill findings.md with relevant EF Memory entries when starting a plan"
+        },
+        "max_prefill_entries": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum memory entries to inject into findings.md on plan start"
+        }
+      }
     }
   }
 }
