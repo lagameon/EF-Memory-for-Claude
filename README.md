@@ -465,9 +465,16 @@ ollama pull nomic-embed-text
 "embedding": {
   "enabled": true,
   "provider": "gemini",
-  "fallback": ["openai"]
+  "fallback": ["openai"],
+  "providers": {
+    "gemini":  { "model": "gemini-embedding-001",   "dimensions": 3072, "api_key_env": "GOOGLE_API_KEY" },
+    "openai":  { "model": "text-embedding-3-small",  "dimensions": 1536, "api_key_env": "OPENAI_API_KEY" },
+    "ollama":  { "model": "nomic-embed-text",         "dimensions": 768,  "host": "http://localhost:11434" }
+  }
 }
 ```
+
+Each provider has its own native dimensions. The system reads `api_key_env` to resolve the environment variable automatically. You only need to configure the provider(s) you plan to use.
 
 **4. Sync** to build the vector index:
 
@@ -506,7 +513,10 @@ Then enable in `.memory/config.json`:
 "reasoning": {
   "enabled": true,
   "provider": "anthropic",
-  "fallback": ["openai", "gemini"]
+  "model": "claude-sonnet-4-20250514",
+  "fallback": ["openai", "gemini"],
+  "max_tokens": 4096,
+  "token_budget": 16000
 }
 ```
 
@@ -592,6 +602,12 @@ cp archetypes/quant/memory.config.patch.json .memory/
   "embedding": {
     "enabled": false,
     "provider": "gemini",
+    "fallback": ["openai"],
+    "providers": {
+      "gemini":  { "model": "gemini-embedding-001",   "dimensions": 3072, "api_key_env": "GOOGLE_API_KEY" },
+      "openai":  { "model": "text-embedding-3-small",  "dimensions": 1536, "api_key_env": "OPENAI_API_KEY" },
+      "ollama":  { "model": "nomic-embed-text",         "dimensions": 768,  "host": "http://localhost:11434" }
+    },
     "dedup_threshold": 0.92
   },
 
