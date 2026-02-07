@@ -1,6 +1,6 @@
 # EF Memory for Claude
 
-> Evidence-first project memory skills for Claude Code — [OpenClaw](https://github.com/pinkpixel-dev/OpenClaw)/moltbot-style structured memory with multi-layer retrieval, auto-verification, and lifecycle management.
+> Evidence-first project memory for Claude Code — structured JSONL storage, hybrid search (embedding + FTS5), auto-harvest from conversations & plan sessions, 9 slash commands, fully automated via hooks.
 
 A **safe, auditable memory skill system** that turns project incidents, constraints, and hard-earned lessons into reusable engineering knowledge. Inspired by the workspace memory architecture of [OpenClaw](https://github.com/pinkpixel-dev/OpenClaw) (moltbot) — but built specifically for Claude Code's skill system with evidence-first guarantees.
 
@@ -17,7 +17,7 @@ This project shares the same philosophy as [OpenClaw](https://github.com/pinkpix
 | **Interface** | CLI commands (`openclaw memory ...`) | Claude Code skills (`/memory-save`, `/memory-search`, ...) |
 | **Storage** | Markdown files + workspace | Structured JSONL + SQLite vector DB |
 | **Retrieval** | Embedding search | 4-level degradation (Hybrid → Vector → Keyword → Basic) |
-| **Safety** | Auto memory flush | Human-in-the-loop for all writes |
+| **Safety** | Auto memory flush | Configurable human-in-the-loop (`human_review_required`) |
 | **Typing** | Free-form | Schema-enforced (type, severity, source, verify) |
 | **Lifecycle** | Manual | Auto-verify, confidence decay, dedup clustering |
 | **Injection** | Plugin-based | Auto-inject Hard rules to `.claude/rules/` |
@@ -36,8 +36,8 @@ Most teams lose critical knowledge over time:
 This system solves that by enforcing:
 - **Evidence-first memory** — every entry has a verifiable source
 - **Executable rules** — what MUST / MUST NOT be done
-- **Human-in-the-loop control** — no silent writes
-- **Zero side effects by default**
+- **Configurable safety** — human review by default, auto-persist option for trusted workflows
+- **Schema validation** — all writes pass structural checks regardless of mode
 
 ---
 
@@ -96,27 +96,25 @@ Hard+S1 entries get a +0.15 re-rank boost; the system always returns results reg
 
 ## Security Boundaries
 
-### When `human_review_required: true` (default)
+### When `human_review_required: true` (template default)
 
 ```
+/memory-save, /memory-import, /memory-scan will:
+  - Display candidates but NOT write to events.jsonl
+  - Require explicit human approval before persisting
+  - Report "No files were modified" after read-only operations
+
 This system will NEVER:
-  - Write files without explicit human request
   - Execute verify commands (static analysis only)
   - Dump all memory entries (max 5 per search)
-  - Auto-persist imported entries
   - Modify existing entries (append-only)
   - Auto-promote drafts to events.jsonl
-
-This system will ALWAYS:
-  - Require human approval for persistence
-  - Report "No files were modified" after read-only operations
-  - Distinguish between "checked" and "assumed" results
 ```
 
 ### When `human_review_required: false`
 
 ```
-/memory-save and /memory-import will:
+/memory-save, /memory-import, /memory-scan will:
   - Validate schema and source before writing
   - Directly append valid entries to events.jsonl
   - Run the automation pipeline after writing
@@ -126,6 +124,7 @@ All other boundaries remain unchanged:
   - /memory-verify still never executes commands
   - /memory-search still returns max 5 entries
   - Entries are still append-only
+  - Read-only commands (/memory-evolve, /memory-reason) never write
 ```
 
 ### How to toggle
@@ -151,43 +150,49 @@ Or tell Claude: **"turn off memory review"** / **"turn on memory review"**
          │
          ▼
 ┌─────────────────┐
-│ /memory-import  │  (extract candidates, DRY-RUN only)
+│ /memory-import  │  (extract candidates from document)
+│ /memory-scan    │  (batch scan multiple documents)
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐
-│ Human Review    │  (verify, edit, approve)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ /memory-save    │  (format entry, output only)
-└────────┬────────┘
-         │
-         ▼ (explicit append request)
-┌─────────────────┐
-│ events.jsonl    │  (append-only storage)
-└────────┬────────┘
-         │
-         ├──────────────────┐
-         ▼                  ▼
-┌─────────────────┐  ┌─────────────────┐
-│ /memory-search  │  │ /memory-verify  │
-│ (query memory)  │  │ (integrity check)│
-└─────────────────┘  └─────────────────┘
+┌─────────────────┐   human_review_required: true
+│ Human Review    │──────────────────────────────┐
+│ (verify, edit)  │                              │ false: auto-persist
+└────────┬────────┘                              │
+         │ approved                              │
+         ▼                                       ▼
+┌─────────────────┐                    ┌─────────────────┐
+│ /memory-save    │  (validate +       │ Auto-persist     │
+│                 │   persist entry)   │ (validate + write)│
+└────────┬────────┘                    └────────┬────────┘
+         │                                      │
+         └──────────────┬───────────────────────┘
+                        ▼
+               ┌─────────────────┐
+               │ events.jsonl    │  (append-only storage)
+               └────────┬────────┘
+                        │
+                        ├── pipeline (sync + rules + evolution + reasoning)
+                        │
+                ┌───────┴───────┐
+                ▼               ▼
+       ┌─────────────────┐  ┌─────────────────┐
+       │ /memory-search  │  │ /memory-verify  │
+       │ (query memory)  │  │ (integrity check)│
+       └─────────────────┘  └─────────────────┘
 ```
 
 | Command | Purpose | Writes Files? |
 |---------|---------|---------------|
-| `/memory-import` | Extract candidates from any document | **Never** |
-| `/memory-save` | Format and display entry | **Never** |
-| `/memory-search` | Query existing memory | **Never** |
-| `/memory-verify` | Check integrity | **Never** |
-| `/memory-plan` | Working memory session management (V3) | Session files only |
-| `/memory-init` | Initialize auto-startup files (V3) | Config files only |
-| `/memory-scan` | Batch document scanning and extraction | **Never** |
-| `/memory-evolve` | Memory health & evolution analysis (V3) | **Never** |
-| `/memory-reason` | Cross-memory reasoning analysis (V3) | **Never** |
+| `/memory-save` | Validate and persist memory entry | `events.jsonl` + pipeline outputs (after approval or auto when `human_review_required=false`) |
+| `/memory-import` | Extract candidates from any document | `events.jsonl` when `human_review_required=false`; otherwise display only |
+| `/memory-scan` | Batch document scanning and extraction | `events.jsonl` when `human_review_required=false`; otherwise display only |
+| `/memory-search` | Query existing memory | Never |
+| `/memory-verify` | Check integrity (static analysis) | Never |
+| `/memory-plan` | Working memory session management (V3) | `.memory/working/` session files |
+| `/memory-init` | Initialize auto-startup files (V3) | `CLAUDE.md`, `hooks.json`, `settings.local.json`, `.claude/rules/` |
+| `/memory-evolve` | Memory health & evolution analysis (V3) | Never (read-only report) |
+| `/memory-reason` | Cross-memory reasoning analysis (V3) | Never (read-only report) |
 
 ---
 
@@ -703,7 +708,7 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── session_start.sh   #   SessionStart → startup health check
 │   ├── pre_edit_search.py #   PreToolUse:Edit|Write → memory search
 │   ├── plan_start.py      #   PreToolUse:EnterPlanMode → auto-start session
-│   └── stop_harvest.py    #   Stop → auto-harvest + persist + pipeline
+│   └── stop_harvest.py    #   Stop → auto-harvest session OR scan conversation → drafts
 ├── lib/                   # Python library modules
 │   ├── text_builder.py    #   Text construction for embedding/dedup
 │   ├── embedder.py        #   Multi-provider embedding (Gemini/OpenAI/Ollama)
@@ -734,7 +739,7 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── scan_cli.py        #   Batch document scanner CLI
 │   ├── init_cli.py        #   V3: project init CLI
 │   └── working_memory_cli.py  #  V3: working memory CLI
-└── tests/                 # 652 unit tests
+└── tests/                 # 670 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -750,7 +755,8 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
     ├── test_scanner.py     #   Batch scanner tests
     ├── test_init.py        #   V3: init + hooks tests
     ├── test_working_memory.py  #  V3: working memory + auto-harvest tests
-    └── test_lifecycle.py   #   V3: lifecycle automation tests
+    ├── test_lifecycle.py   #   V3: lifecycle automation tests
+    └── test_transcript_scanner.py # V3: conversation scan → drafts tests
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
@@ -770,7 +776,13 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 
 ### 1. Will this system write files automatically?
 
-**It depends on your configuration.** With `human_review_required: true` (default for template), all commands are read-only — writes require explicit request. With `human_review_required: false`, the V3 automation engine auto-harvests lessons from working memory sessions, writes them to events.jsonl, and runs the pipeline — all via Claude Code hooks with no manual steps.
+**It depends on your configuration and which commands you use.**
+
+- **`human_review_required: true`** (template default): `/memory-save`, `/memory-import`, and `/memory-scan` display candidates but require explicit approval before writing to `events.jsonl`.
+- **`human_review_required: false`**: These commands auto-persist after schema validation.
+- **Always writes** (regardless of setting): `/memory-init` creates config/hook files, `/memory-plan` creates session files in `.memory/working/`.
+- **V3 hooks**: The Stop hook auto-harvests working memory sessions → `events.jsonl`, and scans conversations → `.memory/drafts/` (drafts always require manual approval).
+- **Never writes**: `/memory-search`, `/memory-verify`, `/memory-evolve`, `/memory-reason` are always read-only.
 
 ### 2. What happens if I run `/memory-search --all`?
 
