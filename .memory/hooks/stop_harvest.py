@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-EF Memory — Stop Hook (Session Harvest)
+EF Memory — Stop Hook (Session Harvest + Conversation Scan)
 
-When Claude finishes responding, checks for an active working memory session.
+When Claude finishes responding:
 
-Behavior depends on config:
-  - v3.auto_harvest_on_stop = true (default):
-      Auto-harvest candidates → convert → write to events.jsonl → clear session.
-      Returns additionalContext with summary.
-  - v3.auto_harvest_on_stop = false:
-      Block stop with reminder to manually harvest (old behavior).
+1. If an active working memory session exists:
+   - v3.auto_harvest_on_stop = true: auto-harvest → events.jsonl → clear
+   - v3.auto_harvest_on_stop = false: block with reminder
+
+2. If NO session exists (normal conversation):
+   - v3.auto_draft_from_conversation = true: scan transcript for patterns
+     → create drafts in .memory/drafts/ → remind user to review
+   - v3.auto_draft_from_conversation = false: exit silently
 
 Runs only once per session (via the 'once' hook config flag).
 Checks stop_hook_active to prevent infinite loops.
@@ -49,7 +51,43 @@ def main():
 
     has_session = findings_path.exists() or progress_path.exists()
     if not has_session:
-        # No active session — let Claude stop normally
+        # No active working memory session — try scanning conversation
+        auto_draft = v3_config.get("auto_draft_from_conversation", True)
+        transcript_path = input_data.get("transcript_path")
+        if not auto_draft or not transcript_path:
+            sys.exit(0)
+
+        try:
+            sys.path.insert(0, str(_MEMORY_DIR))
+            from lib.transcript_scanner import scan_conversation_for_drafts
+
+            drafts_dir = _MEMORY_DIR / "drafts"
+            report = scan_conversation_for_drafts(
+                Path(transcript_path).expanduser(),
+                drafts_dir,
+                _PROJECT_ROOT,
+                config,
+            )
+            if report["drafts_created"] > 0:
+                type_summary = ", ".join(
+                    f"{t} ({n})" for t, n in report["draft_types"].items()
+                )
+                result = {
+                    "additionalContext": (
+                        f"[EF Memory] Conversation scan found "
+                        f"{report['candidates_found']} memory candidates "
+                        f"→ saved {report['drafts_created']} drafts.\n"
+                        f"  Types: {type_summary}\n"
+                        f"  Review with: /memory-save (review pending drafts)\n"
+                        f"  Location: .memory/drafts/\n"
+                        f"No files were modified (events.jsonl unchanged). "
+                        f"Drafts require your approval."
+                    )
+                }
+                print(json.dumps(result))
+        except Exception:
+            pass  # Never block stopping on scan failure
+
         sys.exit(0)
 
     auto_harvest = v3_config.get("auto_harvest_on_stop", True)

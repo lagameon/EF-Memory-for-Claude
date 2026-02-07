@@ -4,6 +4,33 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-07 — V3 M10: Conversation Context Auto-Save
+
+### M10: Conversation Transcript Scanning → Draft Queue
+
+Normal conversations (without Plan Mode) now get scanned for memory-worthy patterns. When Claude stops, the Stop hook reads the conversation transcript and creates draft entries for human review.
+
+**New files (2):**
+- `.memory/lib/transcript_scanner.py` — Reads Claude Code transcript JSONL, extracts assistant messages, scans with 6 harvest patterns, creates drafts
+- `.memory/tests/test_transcript_scanner.py` — 18 tests (transcript reading, pattern matching, draft creation, dedup, source attribution)
+
+**Modified files (3):**
+- `.memory/hooks/stop_harvest.py` — Added conversation scanning branch: when no working memory session exists, reads `transcript_path` from hook stdin, scans for patterns, writes drafts to `.memory/drafts/`
+- `.memory/config.json` — Added `v3.auto_draft_from_conversation: true`
+- `.memory/config.schema.json` — Added `auto_draft_from_conversation` field schema
+
+**Key features:**
+- **Transcript reading**: Parses Claude Code JSONL transcript, extracts assistant text blocks
+- **Pattern reuse**: Same 6 harvest patterns as working memory (LESSON/CONSTRAINT/DECISION/WARNING/MUST-NEVER/Error-Fix)
+- **Draft queue**: Candidates go to `.memory/drafts/` — never directly to `events.jsonl`
+- **Human-in-the-loop**: User reviews drafts via `/memory-save`
+- **Safety**: Never blocks stopping, graceful degradation, 10MB transcript limit, config toggle
+- **Source attribution**: Draft entries tagged with `conversation:{session_id}` source
+
+**Test count: 652 → 670** (+18 tests)
+
+---
+
 ## 2026-02-07 — V3 Full Automation + Deep Memory Integration
 
 ### Plan Session Full Closed-Loop Automation

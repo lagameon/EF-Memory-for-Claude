@@ -470,6 +470,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically harvest, persist, and clear working memory session on stop. When false, blocks with reminder instead."
+        },
+        "auto_draft_from_conversation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan conversation transcript for memory-worthy patterns (LESSON, CONSTRAINT, DECISION, etc.) on stop and create drafts in .memory/drafts/. Drafts require manual review via /memory-save. Only activates when no working memory session exists."
         }
       }
     }

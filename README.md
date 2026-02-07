@@ -343,6 +343,28 @@ Next session (SessionStart hook)
   → next plan mode prefills from newly saved entries
 ```
 
+### M10: Conversation Context Auto-Save
+Normal conversations (without Plan Mode) are also scanned for memory-worthy patterns. On session stop, the Stop hook reads the conversation transcript and creates draft entries for human review.
+
+**How it works**:
+```
+Normal conversation (no Plan Mode)
+  ↓
+Session ends (Stop hook)
+  ↓ No working memory session detected
+  ↓ Read transcript_path from hook stdin
+  scan_conversation_for_drafts()
+  → extract assistant messages from JSONL transcript
+  → apply 6 harvest patterns (LESSON/CONSTRAINT/DECISION/WARNING/MUST-NEVER/Error-Fix)
+  → create drafts in .memory/drafts/ (NOT events.jsonl)
+  → remind user to review via /memory-save
+```
+
+**Key safety properties**:
+- Drafts only — never writes directly to `events.jsonl`
+- Never blocks — only returns `additionalContext` (informational)
+- Configurable via `v3.auto_draft_from_conversation` toggle
+
 ---
 
 ## Automation & Hooks
@@ -356,7 +378,7 @@ EF Memory uses **Claude Code hooks** for event-driven automation — no backgrou
 | **SessionStart** | Session begins | `session_start.sh` | Startup health check (<100ms) |
 | **PreToolUse: Edit\|Write** | Before file edit | `pre_edit_search.py` | Search memory for relevant entries |
 | **PreToolUse: EnterPlanMode** | Plan mode entry | `plan_start.py` | Auto-start working memory session |
-| **Stop** | Response complete | `stop_harvest.py` | Auto-harvest → persist → pipeline → clear |
+| **Stop** | Response complete | `stop_harvest.py` | Auto-harvest session OR scan conversation → drafts |
 | **PreCompact** | Context compaction | echo | Reminder to preserve session state |
 
 ### Pipeline Steps
@@ -375,11 +397,12 @@ reasoning_check  → Cross-memory correlation, contradiction detection, synthesi
 ```json
 {
   "v3": {
-    "auto_startup": true,          // SessionStart hook health check
-    "auto_start_on_plan": true,    // Auto-start session on plan mode
-    "auto_harvest_on_stop": true,  // Auto-harvest + persist on stop
-    "session_recovery": true,      // Detect stale sessions at startup
-    "prefill_on_plan_start": true, // Prefill findings with EF Memory
+    "auto_startup": true,                  // SessionStart hook health check
+    "auto_start_on_plan": true,            // Auto-start session on plan mode
+    "auto_harvest_on_stop": true,          // Auto-harvest + persist on stop
+    "auto_draft_from_conversation": true,  // Scan conversation → drafts on stop
+    "session_recovery": true,              // Detect stale sessions at startup
+    "prefill_on_plan_start": true,         // Prefill findings with EF Memory
     "max_prefill_entries": 5
   },
   "automation": {
@@ -641,6 +664,7 @@ cp archetypes/quant/memory.config.patch.json .memory/
     "auto_startup": true,
     "auto_start_on_plan": true,
     "auto_harvest_on_stop": true,
+    "auto_draft_from_conversation": true,
     "working_memory_dir": ".memory/working",
     "prefill_on_plan_start": true,
     "max_prefill_entries": 5,
@@ -696,7 +720,8 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── reasoning.py       #   LLM reasoning engine (M6)
 │   ├── scanner.py         #   Batch document scanner
 │   ├── init.py            #   Project init & auto-startup (V3 M7)
-│   └── working_memory.py  #   Working memory + auto-harvest (V3 M8-M9)
+│   ├── working_memory.py  #   Working memory + auto-harvest (V3 M8-M9)
+│   └── transcript_scanner.py # Conversation transcript scan → drafts (V3 M10)
 ├── scripts/               # CLI entry points
 │   ├── sync_embeddings.py
 │   ├── search_cli.py
@@ -838,4 +863,4 @@ MIT — see [LICENSE](LICENSE).
 | Schema | 1.0 |
 | Config | 1.5 |
 | Commands | 1.2 (9 slash commands) |
-| V3 Engine | M9 (652 tests) |
+| V3 Engine | M10 (670 tests) |
