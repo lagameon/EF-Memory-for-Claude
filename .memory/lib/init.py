@@ -133,6 +133,9 @@ def generate_hooks_json(existing_hooks: Optional[dict] = None) -> dict:
     """
     Generate or merge .claude/hooks.json with EF Memory hooks.
 
+    DEPRECATED: Prefer generate_hooks_settings() which produces hooks
+    in the Claude Code settings.json format for settings.local.json.
+
     If existing_hooks is provided, merges EF Memory entries into it
     without duplicating (checks by message content prefix).
     """
@@ -168,38 +171,150 @@ def generate_hooks_json(existing_hooks: Optional[dict] = None) -> dict:
     return hooks
 
 
+def generate_hooks_settings() -> dict:
+    """
+    Generate EF Memory hooks in Claude Code settings.json format.
+
+    Returns a dict with hook event names as keys, ready to merge
+    into settings.local.json["hooks"].
+
+    Hooks:
+      - SessionStart: run startup health check
+      - PreToolUse (Edit|Write): search memory for relevant entries
+      - PreToolUse (EnterPlanMode): auto-start working memory session
+      - Stop: auto-harvest + persist + clear (or remind if disabled)
+      - PreCompact: remind to save before compacting
+    """
+    return {
+        "SessionStart": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bash .memory/hooks/session_start.sh",
+                        "timeout": 15,
+                        "statusMessage": "EF Memory startup check",
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 .memory/hooks/pre_edit_search.py",
+                        "timeout": 5,
+                        "statusMessage": "EF Memory search",
+                    }
+                ]
+            },
+            {
+                "matcher": "EnterPlanMode",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 .memory/hooks/plan_start.py",
+                        "timeout": 10,
+                        "statusMessage": "EF Memory plan session",
+                    }
+                ]
+            },
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 .memory/hooks/stop_harvest.py",
+                        "timeout": 30,
+                        "once": True,
+                    }
+                ]
+            }
+        ],
+        "PreCompact": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo '[EF Memory] Before compacting: consider /memory-save if you discovered lessons. Check .memory/working/ for active sessions.'",
+                        "timeout": 5,
+                    }
+                ]
+            }
+        ],
+    }
+
+
 def merge_settings_json(
     existing: Optional[dict],
     memory_permissions: Optional[List[str]] = None,
+    include_hooks: bool = True,
 ) -> dict:
     """
-    Merge EF Memory permissions into existing settings.local.json.
+    Merge EF Memory permissions and hooks into settings.local.json.
 
     Default EF Memory permissions:
     - Bash(python3:*) — for running memory scripts
+    - Bash(bash:*) — for running hook shell scripts
+
+    When include_hooks is True, also merges EF Memory hooks
+    (SessionStart, PreToolUse, Stop, PreCompact).
     """
     if memory_permissions is None:
         memory_permissions = [
             "Bash(python3:*)",
+            "Bash(bash:*)",
         ]
 
     if existing is None:
-        return {
+        settings: dict = {
             "permissions": {
                 "allow": memory_permissions
             }
         }
+    else:
+        settings = json.loads(json.dumps(existing))  # deep copy
+        if "permissions" not in settings:
+            settings["permissions"] = {}
+        if "allow" not in settings["permissions"]:
+            settings["permissions"]["allow"] = []
 
-    settings = json.loads(json.dumps(existing))  # deep copy
-    if "permissions" not in settings:
-        settings["permissions"] = {}
-    if "allow" not in settings["permissions"]:
-        settings["permissions"]["allow"] = []
+        current = settings["permissions"]["allow"]
+        for perm in memory_permissions:
+            if perm not in current:
+                current.append(perm)
 
-    current = settings["permissions"]["allow"]
-    for perm in memory_permissions:
-        if perm not in current:
-            current.append(perm)
+    # Merge hooks
+    if include_hooks:
+        efm_hooks = generate_hooks_settings()
+        if "hooks" not in settings:
+            settings["hooks"] = {}
+
+        for event_name, hook_groups in efm_hooks.items():
+            if event_name not in settings["hooks"]:
+                settings["hooks"][event_name] = hook_groups
+            else:
+                # Check if EF Memory hooks already exist
+                # Match by .memory/hooks/ path OR [EF Memory] marker in command
+                existing_commands = set()
+                for group in settings["hooks"][event_name]:
+                    for h in group.get("hooks", []):
+                        cmd = h.get("command", "")
+                        if ".memory/hooks/" in cmd or "[EF Memory]" in cmd:
+                            existing_commands.add(cmd)
+
+                for group in hook_groups:
+                    for h in group.get("hooks", []):
+                        cmd = h.get("command", "")
+                        if cmd not in existing_commands:
+                            settings["hooks"][event_name].append(group)
+                            break
 
     return settings
 

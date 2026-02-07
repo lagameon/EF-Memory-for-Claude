@@ -27,6 +27,7 @@ from lib.init import (
     generate_claude_md,
     generate_ef_memory_section,
     generate_hooks_json,
+    generate_hooks_settings,
     generate_startup_rule,
     merge_settings_json,
     run_init,
@@ -217,6 +218,62 @@ class TestGenerateHooksJson(unittest.TestCase):
 
 
 # ===========================================================================
+# Test: generate_hooks_settings
+# ===========================================================================
+
+class TestGenerateHooksSettings(unittest.TestCase):
+
+    def test_returns_all_event_types(self):
+        hooks = generate_hooks_settings()
+        self.assertIn("SessionStart", hooks)
+        self.assertIn("PreToolUse", hooks)
+        self.assertIn("Stop", hooks)
+        self.assertIn("PreCompact", hooks)
+
+    def test_session_start_hook(self):
+        hooks = generate_hooks_settings()
+        group = hooks["SessionStart"][0]
+        self.assertEqual(group["matcher"], "")
+        hook = group["hooks"][0]
+        self.assertEqual(hook["type"], "command")
+        self.assertIn("session_start.sh", hook["command"])
+
+    def test_pre_tool_use_edit_write_matcher(self):
+        hooks = generate_hooks_settings()
+        group = hooks["PreToolUse"][0]
+        self.assertEqual(group["matcher"], "Edit|Write")
+
+    def test_pre_tool_use_enter_plan_mode_hook(self):
+        hooks = generate_hooks_settings()
+        # Second PreToolUse group is for EnterPlanMode
+        self.assertEqual(len(hooks["PreToolUse"]), 2)
+        group = hooks["PreToolUse"][1]
+        self.assertEqual(group["matcher"], "EnterPlanMode")
+        hook = group["hooks"][0]
+        self.assertIn("plan_start.py", hook["command"])
+
+    def test_stop_hook_has_once(self):
+        hooks = generate_hooks_settings()
+        group = hooks["Stop"][0]
+        hook = group["hooks"][0]
+        self.assertTrue(hook.get("once"))
+
+    def test_pre_compact_uses_echo(self):
+        hooks = generate_hooks_settings()
+        group = hooks["PreCompact"][0]
+        hook = group["hooks"][0]
+        self.assertIn("echo", hook["command"])
+        self.assertIn("[EF Memory]", hook["command"])
+
+    def test_all_hooks_have_timeout(self):
+        hooks = generate_hooks_settings()
+        for event_name, groups in hooks.items():
+            for group in groups:
+                for hook in group["hooks"]:
+                    self.assertIn("timeout", hook, f"{event_name} hook missing timeout")
+
+
+# ===========================================================================
 # Test: merge_settings_json
 # ===========================================================================
 
@@ -227,6 +284,7 @@ class TestMergeSettingsJson(unittest.TestCase):
         self.assertIn("permissions", result)
         self.assertIn("allow", result["permissions"])
         self.assertIn("Bash(python3:*)", result["permissions"]["allow"])
+        self.assertIn("Bash(bash:*)", result["permissions"]["allow"])
 
     def test_merge_with_existing(self):
         existing = {
@@ -237,12 +295,15 @@ class TestMergeSettingsJson(unittest.TestCase):
         result = merge_settings_json(existing)
         self.assertIn("Bash(git:*)", result["permissions"]["allow"])
         self.assertIn("Bash(python3:*)", result["permissions"]["allow"])
+        self.assertIn("Bash(bash:*)", result["permissions"]["allow"])
 
     def test_no_duplicate_on_rerun(self):
         result1 = merge_settings_json(None)
         result2 = merge_settings_json(result1)
         count = result2["permissions"]["allow"].count("Bash(python3:*)")
         self.assertEqual(count, 1)
+        count_bash = result2["permissions"]["allow"].count("Bash(bash:*)")
+        self.assertEqual(count_bash, 1)
 
     def test_custom_permissions(self):
         result = merge_settings_json(None, memory_permissions=["Bash(custom:*)"])
@@ -267,6 +328,52 @@ class TestMergeSettingsJson(unittest.TestCase):
         # Original should be unchanged
         self.assertEqual(len(existing["permissions"]["allow"]), 1)
         self.assertGreater(len(result["permissions"]["allow"]), 1)
+
+    def test_includes_hooks_by_default(self):
+        result = merge_settings_json(None)
+        self.assertIn("hooks", result)
+        self.assertIn("SessionStart", result["hooks"])
+        self.assertIn("PreToolUse", result["hooks"])
+        self.assertIn("Stop", result["hooks"])
+        self.assertIn("PreCompact", result["hooks"])
+
+    def test_hooks_disabled(self):
+        result = merge_settings_json(None, include_hooks=False)
+        self.assertNotIn("hooks", result)
+
+    def test_hooks_idempotent_on_rerun(self):
+        """Running merge twice should not duplicate any hooks."""
+        result1 = merge_settings_json(None)
+        result2 = merge_settings_json(result1)
+        for event_name in ("SessionStart", "PreToolUse", "Stop", "PreCompact"):
+            self.assertEqual(
+                len(result2["hooks"][event_name]),
+                len(result1["hooks"][event_name]),
+                f"{event_name} hook groups duplicated on second merge",
+            )
+
+    def test_hooks_merge_preserves_non_efm_hooks(self):
+        """Non-EFM hooks in the same event should be preserved."""
+        existing = {
+            "permissions": {"allow": []},
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "my-custom-linter"}],
+                    }
+                ]
+            },
+        }
+        result = merge_settings_json(existing)
+        # Should have custom hook + 2 EFM hooks (Edit|Write + EnterPlanMode)
+        self.assertEqual(len(result["hooks"]["PreToolUse"]), 3)
+
+    def test_hooks_precompact_not_duplicated(self):
+        """PreCompact hook (echo command) must not duplicate on rerun."""
+        result1 = merge_settings_json(None)
+        result2 = merge_settings_json(result1)
+        self.assertEqual(len(result2["hooks"]["PreCompact"]), 1)
 
 
 # ===========================================================================
@@ -433,6 +540,10 @@ class TestRunInit(unittest.TestCase):
         self.assertTrue(path.exists())
         data = json.loads(path.read_text())
         self.assertIn("Bash(python3:*)", data["permissions"]["allow"])
+        self.assertIn("Bash(bash:*)", data["permissions"]["allow"])
+        # Should also have hooks
+        self.assertIn("hooks", data)
+        self.assertIn("SessionStart", data["hooks"])
 
     def test_entry_count_interpolated(self):
         run_init(self.project_root, self.config)

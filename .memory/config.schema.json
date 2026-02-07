@@ -45,7 +45,7 @@
         },
         "INCIDENTS_FILE": {
           "type": "string",
-          "description": "Path to incidents log file"
+          "description": "Path to incidents log file (optional, legacy — use doc_roots for general document scanning)"
         }
       },
       "additionalProperties": {
@@ -391,6 +391,40 @@
         }
       }
     },
+    "scan": {
+      "type": "object",
+      "description": "Document scanning configuration for /memory-scan batch import",
+      "properties": {
+        "auto_scan_on_init": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, /memory-init automatically runs document discovery and offers to import. When false, only shows advisory suggestions."
+        },
+        "exclude_patterns": {
+          "type": "array",
+          "items": {"type": "string"},
+          "default": ["**/node_modules/**", "**/.git/**", "**/venv/**", "**/__pycache__/**", "**/.memory/**"],
+          "description": "Glob patterns to exclude from scanning"
+        },
+        "max_documents": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum documents per scan session"
+        },
+        "relevance_keywords": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Keywords used for relevance scoring in document content sampling"
+        },
+        "high_value_filenames": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Filenames that receive a bonus relevance score"
+        }
+      }
+    },
     "v3": {
       "type": "object",
       "description": "V3 Auto-Startup and Working Memory configuration",
@@ -426,6 +460,16 @@
           "type": "boolean",
           "default": true,
           "description": "Detect and report stale working memory sessions at startup"
+        },
+        "auto_start_on_plan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start working memory session when entering plan mode"
+        },
+        "auto_harvest_on_stop": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically harvest, persist, and clear working memory session on stop. When false, blocks with reminder instead."
         }
       }
     }

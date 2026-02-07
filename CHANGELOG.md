@@ -4,6 +4,52 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-07 — V3 Full Automation + Deep Memory Integration
+
+### Plan Session Full Closed-Loop Automation
+
+Complete automation of the working memory lifecycle via Claude Code hooks — no manual steps required.
+
+**New files (2):**
+- `.memory/hooks/plan_start.py` — PreToolUse hook: auto-starts working memory session on EnterPlanMode
+- `.claude/commands/memory-evolve.md` — `/memory-evolve` slash command
+- `.claude/commands/memory-reason.md` — `/memory-reason` slash command
+
+**Modified files (7):**
+- `.memory/lib/working_memory.py` — Added `auto_harvest_and_persist()`, `_convert_candidate_to_entry()`, `_hash8()`, `_sanitize_anchor()`, `_extract_tags()`
+- `.memory/hooks/stop_harvest.py` — Changed from block+remind to auto-harvest+persist+pipeline+clear
+- `.memory/lib/init.py` — Added EnterPlanMode hook in `generate_hooks_settings()`; Stop hook timeout 5→30s
+- `.memory/config.json` — Added `v3.auto_start_on_plan`, `v3.auto_harvest_on_stop`; pipeline_steps now includes `evolution_check` and `reasoning_check`; removed `INCIDENTS_FILE` (use `doc_roots` instead)
+- `.memory/config.schema.json` — Added new v3 field schemas; updated INCIDENTS_FILE description
+- `.memory/tests/test_working_memory.py` — +23 tests (hash, sanitize, convert, auto-harvest, extract_tags)
+- `.memory/tests/test_init.py` — Updated hook tests for EnterPlanMode
+
+**Key features:**
+- **Auto-start**: EnterPlanMode hook starts working memory session with prefill
+- **Auto-harvest**: Stop hook extracts LESSON/CONSTRAINT/DECISION/WARNING markers
+- **Auto-persist**: Converts HarvestCandidate → full EFM schema entry → appends to events.jsonl
+- **Auto-pipeline**: Runs sync + rules + evolution + reasoning after writing
+- **Auto-clear**: Cleans session files after successful harvest
+- **Graceful fallback**: If auto-harvest fails, falls back to block+remind behavior
+
+### Deep Memory Integration
+
+Evolution (M5) and reasoning (M6) now run automatically as pipeline steps and have dedicated slash commands.
+
+- `evolution_check` and `reasoning_check` added to default `pipeline_steps`
+- `/memory-evolve` — Memory health analysis: confidence, duplicates, deprecations, merges
+- `/memory-reason` — Cross-memory reasoning: correlations, contradictions, synthesis, risks
+
+### Documentation Generalization
+
+- Removed hardcoded `INCIDENTS_FILE` from config — system now works with any `*.md` document via `doc_roots` and `supported_sources`
+- Updated README.md with full automation section, hook architecture, pipeline steps
+- Updated directory structure with hooks, new commands (9 total), 652 tests
+
+**Test count: 571 → 652** (+81 tests)
+
+---
+
 ## 2026-02-07 — v3.0.0 M7-M9: Auto-Startup + Working Memory + Lifecycle
 
 ### M7: Project Init & Auto-Startup

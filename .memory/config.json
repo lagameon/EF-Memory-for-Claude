@@ -46,8 +46,7 @@
     "FEATURE_ROOTS": ["src/features/"],
     "LABEL_ROOTS": ["src/labels/"],
     "DEPLOYMENT_ROOTS": ["deployment/"],
-    "DOCS_ROOT": "docs/",
-    "INCIDENTS_FILE": "docs/INCIDENTS.md"
+    "DOCS_ROOT": "docs/"
   },
 
   "verify": {
@@ -72,9 +71,9 @@
   },
 
   "automation": {
-    "human_review_required": true,
+    "human_review_required": false,
     "startup_check": true,
-    "pipeline_steps": ["sync_embeddings", "generate_rules"],
+    "pipeline_steps": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check"],
     "pipeline_after_approve": false,
     "dedup_check_on_capture": true,
     "dedup_threshold": 0.85,
@@ -130,12 +129,37 @@
     "token_budget": 16000
   },
 
+  "scan": {
+    "auto_scan_on_init": true,
+    "exclude_patterns": [
+      "**/node_modules/**",
+      "**/.git/**",
+      "**/venv/**",
+      "**/__pycache__/**",
+      "**/.memory/**",
+      "**/dist/**",
+      "**/build/**"
+    ],
+    "max_documents": 20,
+    "relevance_keywords": [
+      "MUST", "NEVER", "ALWAYS", "CONSTRAINT", "INVARIANT",
+      "LESSON", "DECISION", "ROOT CAUSE", "FIX", "RISK",
+      "WARNING", "BREAKING CHANGE", "MIGRATION"
+    ],
+    "high_value_filenames": [
+      "INCIDENTS.md", "DECISIONS.md", "ARCHITECTURE.md",
+      "RUNBOOK.md", "CHANGELOG.md", "CLAUDE.md", "README.md"
+    ]
+  },
+
   "v3": {
     "auto_startup": true,
     "working_memory_dir": ".memory/working",
     "harvest_on_compact": true,
     "prefill_on_plan_start": true,
     "max_prefill_entries": 5,
-    "session_recovery": true
+    "session_recovery": true,
+    "auto_start_on_plan": true,
+    "auto_harvest_on_stop": true
   }
 }

@@ -33,13 +33,18 @@ from lib.working_memory import (
     SessionResumeReport,
     SessionStartReport,
     SessionStatus,
+    _convert_candidate_to_entry,
     _count_phases,
     _extract_candidates,
     _extract_field,
+    _extract_tags,
     _generate_findings,
     _generate_progress,
     _generate_task_plan,
     _get_current_phase,
+    _hash8,
+    _sanitize_anchor,
+    auto_harvest_and_persist,
     clear_session,
     get_session_status,
     harvest_session,
@@ -728,6 +733,229 @@ class TestDataclasses(unittest.TestCase):
         )
         self.assertEqual(c.suggested_type, "lesson")
         self.assertEqual(c.rule, "MUST test")
+
+
+# ===========================================================================
+# Test: _hash8
+# ===========================================================================
+
+class TestHash8(unittest.TestCase):
+
+    def test_returns_8_chars(self):
+        self.assertEqual(len(_hash8("hello")), 8)
+
+    def test_hex_only(self):
+        import re
+        self.assertRegex(_hash8("test input"), r"^[a-f0-9]{8}$")
+
+    def test_deterministic(self):
+        self.assertEqual(_hash8("same"), _hash8("same"))
+
+    def test_different_inputs(self):
+        self.assertNotEqual(_hash8("a"), _hash8("b"))
+
+
+# ===========================================================================
+# Test: _sanitize_anchor
+# ===========================================================================
+
+class TestSanitizeAnchor(unittest.TestCase):
+
+    def test_working_findings(self):
+        result = _sanitize_anchor(".memory/working/findings.md")
+        self.assertEqual(result, "working_findings")
+
+    def test_working_progress(self):
+        result = _sanitize_anchor(".memory/working/progress.md")
+        self.assertEqual(result, "working_progress")
+
+    def test_simple_filename(self):
+        result = _sanitize_anchor("test.md")
+        self.assertEqual(result, "test")
+
+    def test_strips_special_chars(self):
+        result = _sanitize_anchor("path/to/MY-FILE.py")
+        # Lowercased, hyphens removed
+        self.assertRegex(result, r"^[a-z0-9_]+$")
+
+
+# ===========================================================================
+# Test: _convert_candidate_to_entry
+# ===========================================================================
+
+class TestConvertCandidateToEntry(unittest.TestCase):
+
+    def _make_candidate(self, **kwargs):
+        defaults = {
+            "suggested_type": "lesson",
+            "title": "Test lesson title here",
+            "content": ["Point one", "Point two"],
+            "rule": None,
+            "implication": "Things could break",
+            "source_hint": ".memory/working/findings.md",
+            "extraction_reason": "Explicit LESSON: marker",
+        }
+        defaults.update(kwargs)
+        return HarvestCandidate(**defaults)
+
+    def test_lesson_type_soft(self):
+        entry = _convert_candidate_to_entry(self._make_candidate(), Path("/proj"))
+        self.assertEqual(entry["type"], "lesson")
+        self.assertEqual(entry["classification"], "soft")
+
+    def test_constraint_type_hard(self):
+        entry = _convert_candidate_to_entry(
+            self._make_candidate(suggested_type="constraint", rule="MUST check input"),
+            Path("/proj"),
+        )
+        self.assertEqual(entry["type"], "constraint")
+        self.assertEqual(entry["classification"], "hard")
+        self.assertEqual(entry["severity"], "S1")
+
+    def test_risk_type_hard_s2(self):
+        entry = _convert_candidate_to_entry(
+            self._make_candidate(suggested_type="risk"),
+            Path("/proj"),
+        )
+        self.assertEqual(entry["classification"], "hard")
+        self.assertEqual(entry["severity"], "S2")
+
+    def test_id_format(self):
+        import re
+        entry = _convert_candidate_to_entry(self._make_candidate(), Path("/proj"))
+        self.assertRegex(entry["id"], r"^[a-z]+-[a-z0-9_]+-[a-f0-9]{8}$")
+
+    def test_has_required_fields(self):
+        entry = _convert_candidate_to_entry(self._make_candidate(), Path("/proj"))
+        for field in ("id", "type", "classification", "title", "content", "source", "created_at"):
+            self.assertIn(field, entry, f"Missing required field: {field}")
+
+    def test_content_min_2_items(self):
+        entry = _convert_candidate_to_entry(
+            self._make_candidate(content=["Single item"]),
+            Path("/proj"),
+        )
+        self.assertGreaterEqual(len(entry["content"]), 2)
+
+    def test_title_truncated_to_120(self):
+        long_title = "A" * 200
+        entry = _convert_candidate_to_entry(
+            self._make_candidate(title=long_title),
+            Path("/proj"),
+        )
+        self.assertLessEqual(len(entry["title"]), 120)
+
+    def test_auto_harvested_meta(self):
+        entry = _convert_candidate_to_entry(self._make_candidate(), Path("/proj"))
+        self.assertTrue(entry.get("_meta", {}).get("auto_harvested"))
+
+
+# ===========================================================================
+# Test: auto_harvest_and_persist
+# ===========================================================================
+
+class TestAutoHarvestAndPersist(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+        self.working_dir = self.project_root / ".memory" / "working"
+        self.working_dir.mkdir(parents=True)
+        self.events_path = self.project_root / ".memory" / "events.jsonl"
+        self.events_path.write_text("")
+        self.config = {"v3": {"working_memory_dir": ".memory/working"}}
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir)
+
+    def _write_session_with_markers(self):
+        """Create session files with harvestable markers."""
+        (self.working_dir / TASK_PLAN_FILE).write_text("# Task Plan\n**Task**: Test\n")
+        (self.working_dir / FINDINGS_FILE).write_text(
+            "# Findings\n\nLESSON: Always validate input before processing\n"
+            "CONSTRAINT: MUST use shift(1) before rolling\n"
+        )
+        (self.working_dir / PROGRESS_FILE).write_text("# Progress\n- Started\n")
+
+    def test_writes_entries_to_events(self):
+        self._write_session_with_markers()
+        result = auto_harvest_and_persist(
+            self.working_dir, self.events_path,
+            self.project_root, self.config,
+            run_pipeline_after=False,
+        )
+        self.assertGreater(result["candidates_found"], 0)
+        self.assertGreater(result["entries_written"], 0)
+        # Verify events.jsonl has content
+        content = self.events_path.read_text()
+        self.assertTrue(content.strip())
+        # Each line should be valid JSON
+        for line in content.strip().split("\n"):
+            entry = json.loads(line)
+            self.assertIn("id", entry)
+            self.assertIn("type", entry)
+
+    def test_no_candidates_still_clears(self):
+        # Session with no harvestable markers
+        (self.working_dir / TASK_PLAN_FILE).write_text("# Task Plan\n")
+        (self.working_dir / FINDINGS_FILE).write_text("# Findings\nNothing special\n")
+        (self.working_dir / PROGRESS_FILE).write_text("# Progress\n- Done\n")
+
+        result = auto_harvest_and_persist(
+            self.working_dir, self.events_path,
+            self.project_root, self.config,
+            run_pipeline_after=False,
+        )
+        self.assertEqual(result["candidates_found"], 0)
+        self.assertEqual(result["entries_written"], 0)
+        self.assertTrue(result["session_cleared"])
+
+    def test_clears_session(self):
+        self._write_session_with_markers()
+        result = auto_harvest_and_persist(
+            self.working_dir, self.events_path,
+            self.project_root, self.config,
+            run_pipeline_after=False,
+        )
+        self.assertTrue(result["session_cleared"])
+        # Session files should be gone
+        self.assertFalse((self.working_dir / TASK_PLAN_FILE).exists())
+        self.assertFalse((self.working_dir / FINDINGS_FILE).exists())
+
+    def test_no_session_returns_early(self):
+        """No working files → harvest returns empty, clear returns False."""
+        # Don't create any session files
+        result = auto_harvest_and_persist(
+            self.working_dir, self.events_path,
+            self.project_root, self.config,
+            run_pipeline_after=False,
+        )
+        self.assertEqual(result["candidates_found"], 0)
+
+
+# ===========================================================================
+# Test: _extract_tags
+# ===========================================================================
+
+class TestExtractTags(unittest.TestCase):
+
+    def test_extracts_keywords(self):
+        tags = _extract_tags("Rolling statistics leakage", ["shift(1) prevents leakage"])
+        self.assertIn("rolling", tags)
+        self.assertIn("statistics", tags)
+        self.assertIn("leakage", tags)
+
+    def test_max_5_tags(self):
+        tags = _extract_tags(
+            "one two three four five six seven",
+            ["eight nine ten eleven twelve"],
+        )
+        self.assertLessEqual(len(tags), 5)
+
+    def test_filters_stop_words(self):
+        tags = _extract_tags("the and for with", ["this that are was"])
+        self.assertEqual(tags, [])
 
 
 if __name__ == "__main__":

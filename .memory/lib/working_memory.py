@@ -17,6 +17,7 @@ All files live in .memory/working/ (gitignored).
 No external dependencies — pure Python stdlib + internal search module.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -629,6 +630,208 @@ def _extract_candidates(
             ))
 
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# Auto-harvest automation (V3 M10 — closed-loop plan sessions)
+# ---------------------------------------------------------------------------
+
+def _hash8(text: str) -> str:
+    """Generate first 8 chars of SHA-256 hex digest."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def _sanitize_anchor(source_hint: str) -> str:
+    """Convert a source path to a valid ID anchor component.
+
+    Example: ".memory/working/findings.md" → "working_findings"
+    """
+    # Take filename without extension + parent dir name
+    p = Path(source_hint)
+    stem = p.stem.lower()
+    parent = p.parent.name.lower() if p.parent.name else ""
+
+    anchor = f"{parent}_{stem}" if parent else stem
+    # Keep only [a-z0-9_]
+    anchor = re.sub(r"[^a-z0-9_]", "", anchor)
+    # Collapse runs of underscores and strip edges
+    anchor = re.sub(r"_+", "_", anchor).strip("_")
+    return anchor or "session"
+
+
+def _convert_candidate_to_entry(
+    candidate: HarvestCandidate,
+    project_root: Path,
+) -> dict:
+    """Convert a HarvestCandidate to a full EFM schema entry.
+
+    Generates a complete entry with proper id, type, classification,
+    severity, source, tags, and timestamps.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry_type = candidate.suggested_type
+
+    # Classification: constraint/risk → hard, rest → soft
+    if entry_type in ("constraint", "risk"):
+        classification = "hard"
+    else:
+        classification = "soft"
+
+    # Severity heuristic
+    severity = None
+    rule_text = candidate.rule or ""
+    if any(kw in rule_text.upper() for kw in ("MUST", "NEVER", "ALWAYS")):
+        severity = "S1"
+    elif entry_type == "risk":
+        severity = "S2"
+    elif classification == "hard":
+        severity = "S2"
+
+    # ID generation: {type}-{anchor}-{hash8}
+    anchor = _sanitize_anchor(candidate.source_hint)
+    hash_input = candidate.title + candidate.source_hint
+    entry_id = f"{entry_type}-{anchor}-{_hash8(hash_input)}"
+
+    # Source normalization
+    source_path = candidate.source_hint
+    if project_root and source_path.startswith(str(project_root)):
+        source_path = str(Path(source_path).relative_to(project_root))
+    source = [f"{source_path}:L0-L0"]
+
+    # Content: ensure 2-6 items
+    content = list(candidate.content)
+    if candidate.extraction_reason and candidate.extraction_reason not in content:
+        content.append(f"Extracted via: {candidate.extraction_reason}")
+    content = content[:6]
+    if len(content) < 2:
+        content.append(f"Auto-harvested from working memory session")
+
+    return {
+        "id": entry_id,
+        "type": entry_type,
+        "classification": classification,
+        "severity": severity,
+        "title": candidate.title[:120],
+        "content": content,
+        "rule": candidate.rule,
+        "implication": candidate.implication,
+        "verify": None,
+        "source": source,
+        "tags": _extract_tags(candidate.title, content),
+        "created_at": now,
+        "last_verified": None,
+        "deprecated": False,
+        "_meta": {"auto_harvested": True},
+    }
+
+
+def _extract_tags(title: str, content: List[str]) -> List[str]:
+    """Extract keyword tags from title and content."""
+    text = (title + " " + " ".join(content)).lower()
+    # Split on non-alphanumeric
+    words = re.findall(r"[a-z]{3,}", text)
+    # Filter common stop words
+    stop = {
+        "the", "and", "for", "with", "from", "that", "this", "are",
+        "was", "were", "has", "have", "had", "not", "but", "can",
+        "will", "should", "must", "never", "always", "when", "before",
+        "after", "into", "all", "each", "every", "any", "use", "using",
+        "auto", "harvested", "working", "memory", "session", "extracted",
+    }
+    # Deduplicate preserving order, skip stop words
+    seen: set = set()
+    tags = []
+    for w in words:
+        if w not in stop and w not in seen:
+            seen.add(w)
+            tags.append(w)
+    return tags[:5]
+
+
+def auto_harvest_and_persist(
+    working_dir: Path,
+    events_path: Path,
+    project_root: Path,
+    config: dict,
+    run_pipeline_after: bool = True,
+) -> dict:
+    """Full closed-loop automation: harvest → convert → write → pipeline → clear.
+
+    Steps:
+      1. harvest_session() → candidates
+      2. Convert each to a proper schema entry
+      3. Validate schema, skip invalid
+      4. Append valid entries to events.jsonl
+      5. Optionally run pipeline (sync + generate_rules)
+      6. clear_session()
+
+    Returns summary dict with counts and errors.
+    """
+    result = {
+        "candidates_found": 0,
+        "entries_written": 0,
+        "entries_skipped": 0,
+        "pipeline_run": False,
+        "session_cleared": False,
+        "errors": [],
+    }
+
+    # Step 1: Harvest
+    try:
+        harvest_report = harvest_session(working_dir, events_path, config)
+        result["candidates_found"] = len(harvest_report.candidates)
+    except Exception as e:
+        result["errors"].append(f"Harvest failed: {e}")
+        return result
+
+    if not harvest_report.candidates:
+        # No candidates — just clear
+        result["session_cleared"] = clear_session(working_dir)
+        return result
+
+    # Step 2-3: Convert and validate
+    valid_entries = []
+    for candidate in harvest_report.candidates:
+        try:
+            entry = _convert_candidate_to_entry(candidate, project_root)
+            # Basic validation
+            from .auto_verify import validate_schema
+            vr = validate_schema(entry)
+            if vr.valid:
+                valid_entries.append(entry)
+            else:
+                result["entries_skipped"] += 1
+                logger.warning(
+                    f"Skipped invalid entry '{candidate.title}': "
+                    f"{[c.message for c in vr.checks if not c.passed]}"
+                )
+        except Exception as e:
+            result["entries_skipped"] += 1
+            result["errors"].append(f"Convert failed for '{candidate.title}': {e}")
+
+    # Step 4: Write to events.jsonl
+    if valid_entries:
+        try:
+            with open(events_path, "a") as f:
+                for entry in valid_entries:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            result["entries_written"] = len(valid_entries)
+        except Exception as e:
+            result["errors"].append(f"Write failed: {e}")
+
+    # Step 5: Run pipeline
+    if run_pipeline_after and result["entries_written"] > 0:
+        try:
+            from .auto_sync import run_pipeline
+            run_pipeline(events_path, config, project_root)
+            result["pipeline_run"] = True
+        except Exception as e:
+            result["errors"].append(f"Pipeline failed: {e}")
+
+    # Step 6: Clear session
+    result["session_cleared"] = clear_session(working_dir)
+
+    return result
 
 
 # ---------------------------------------------------------------------------

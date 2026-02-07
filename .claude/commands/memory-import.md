@@ -317,7 +317,9 @@ WARN if: Entry duplicates existing memory (suggest checking /memory-search first
 ```
 - Validate all entries, then directly append to events.jsonl
 - Display summary of what was written (entry count, titles)
-- Run automation pipeline after writing (sync + rules)
+- Run automation pipeline after writing:
+    python3 .memory/scripts/pipeline_cli.py
+  This syncs the search index and regenerates Hard rules in .claude/rules/ef-memory/
 - Still NEVER invent sources or create entries without Rule/Implication
 ```
 

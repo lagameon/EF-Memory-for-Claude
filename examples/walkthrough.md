@@ -22,8 +22,7 @@ cp -r /path/to/EF-Memory-for-Claude/.claude /your/project/
 # 2. Edit config (set your paths)
 # Edit .memory/config.json:
 #   "CODE_ROOTS": ["src/", "lib/"],
-#   "DOCS_ROOT": "docs/",
-#   "INCIDENTS_FILE": "docs/INCIDENTS.md"
+#   "DOCS_ROOT": "docs/"
 
 # 3. Verify setup (in Claude Code)
 /memory-verify

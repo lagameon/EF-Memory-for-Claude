@@ -146,7 +146,7 @@ Or tell Claude: **"turn off memory review"** / **"turn on memory review"**
 
 ```
 ┌─────────────────┐
-│ Any Document    │  (incidents, decisions, architecture, runbooks, code...)
+│ Any Document    │  (*.md, *.py, *.ts — any structured document)
 └────────┬────────┘
          │
          ▼
@@ -185,6 +185,9 @@ Or tell Claude: **"turn off memory review"** / **"turn on memory review"**
 | `/memory-verify` | Check integrity | **Never** |
 | `/memory-plan` | Working memory session management (V3) | Session files only |
 | `/memory-init` | Initialize auto-startup files (V3) | Config files only |
+| `/memory-scan` | Batch document scanning and extraction | **Never** |
+| `/memory-evolve` | Memory health & evolution analysis (V3) | **Never** |
+| `/memory-reason` | Cross-memory reasoning analysis (V3) | **Never** |
 
 ---
 
@@ -314,21 +317,81 @@ Or use the `/memory-plan` command for the full workflow.
 **Harvest patterns**: LESSON, CONSTRAINT, DECISION, WARNING markers, MUST/NEVER statements, and Error→Fix pairs are automatically extracted as `/memory-save` candidates.
 
 ### M9: Memory Lifecycle Automation
-Closed-loop lifecycle: start session → work → harvest → save → next session auto-prefill.
-
-- **harvest_check pipeline step**: Scans working memory for harvestable candidates
-- **Session recovery**: Detects stale working memory sessions at startup
-- **Startup hint**: Reports active session task and progress in health check
+Full closed-loop lifecycle automation via Claude Code hooks. No manual steps required.
 
 ```bash
 python3 .memory/scripts/pipeline_cli.py --harvest-only   # Run harvest step
 python3 .memory/scripts/pipeline_cli.py --startup         # Shows active session info
 ```
 
-**Lifecycle flow**:
+**Automatic lifecycle flow**:
 ```
-/memory-plan start → prefill findings.md → work → harvest → /memory-save → pipeline sync → next session
+Enter Plan Mode
+  ↓ (EnterPlanMode hook)
+  auto start_session() + prefill findings.md
+  ↓
+Claude works (edits trigger memory search via Edit|Write hook)
+  ↓
+Session ends (Stop hook)
+  ↓ auto_harvest_and_persist()
+  harvest candidates → convert to entries → write events.jsonl
+  → run pipeline (sync + rules + evolution + reasoning)
+  → clear session
+  ↓
+Next session (SessionStart hook)
+  → startup health check
+  → next plan mode prefills from newly saved entries
 ```
+
+---
+
+## Automation & Hooks
+
+EF Memory uses **Claude Code hooks** for event-driven automation — no background daemons or cron jobs.
+
+### Hook Architecture
+
+| Hook | Event | Script | What it does |
+|------|-------|--------|-------------|
+| **SessionStart** | Session begins | `session_start.sh` | Startup health check (<100ms) |
+| **PreToolUse: Edit\|Write** | Before file edit | `pre_edit_search.py` | Search memory for relevant entries |
+| **PreToolUse: EnterPlanMode** | Plan mode entry | `plan_start.py` | Auto-start working memory session |
+| **Stop** | Response complete | `stop_harvest.py` | Auto-harvest → persist → pipeline → clear |
+| **PreCompact** | Context compaction | echo | Reminder to preserve session state |
+
+### Pipeline Steps
+
+The automation pipeline runs automatically on session stop (and can be invoked manually):
+
+```
+sync_embeddings  → Update FTS5 index (+ vector embeddings if enabled)
+generate_rules   → Regenerate .claude/rules/ef-memory/*.md from Hard entries
+evolution_check  → Duplicate detection, confidence scoring, deprecation suggestions
+reasoning_check  → Cross-memory correlation, contradiction detection, synthesis
+```
+
+### Automation Config Toggles
+
+```json
+{
+  "v3": {
+    "auto_startup": true,          // SessionStart hook health check
+    "auto_start_on_plan": true,    // Auto-start session on plan mode
+    "auto_harvest_on_stop": true,  // Auto-harvest + persist on stop
+    "session_recovery": true,      // Detect stale sessions at startup
+    "prefill_on_plan_start": true, // Prefill findings with EF Memory
+    "max_prefill_entries": 5
+  },
+  "automation": {
+    "human_review_required": false,  // Auto-persist after validation
+    "pipeline_steps": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check"]
+  },
+  "embedding": { "enabled": false },  // Set true + API key for vector search
+  "reasoning": { "enabled": false }   // Set true + API key for LLM reasoning
+}
+```
+
+All automation is idempotent and uses graceful degradation — embeddings fall back to FTS, reasoning falls back to heuristics, pipeline continues if a step fails.
 
 ---
 
@@ -356,8 +419,7 @@ Edit `.memory/config.json`:
 {
   "paths": {
     "CODE_ROOTS": ["src/", "lib/"],
-    "DOCS_ROOT": "docs/",
-    "INCIDENTS_FILE": "docs/INCIDENTS.md"
+    "DOCS_ROOT": "docs/"
   },
   "import": {
     "supported_sources": ["*.md", "*.py", "*.ts", "*.js", "*.go"],
@@ -366,7 +428,7 @@ Edit `.memory/config.json`:
 }
 ```
 
-The `import` section defines which file types `/memory-import` can extract from. By default it supports all common document and code formats.
+The `import` section defines which file types `/memory-import` and `/memory-scan` can extract from. By default it supports all common document and code formats — any `*.md`, `*.py`, `*.ts`, `*.js`, `*.go` file.
 
 ### Step 3: Choose an archetype (optional)
 
@@ -400,8 +462,7 @@ cp archetypes/quant/memory.config.patch.json .memory/
 
   "paths": {
     "CODE_ROOTS": ["src/"],
-    "DOCS_ROOT": "docs/",
-    "INCIDENTS_FILE": "docs/INCIDENTS.md"
+    "DOCS_ROOT": "docs/"
   },
 
   "import": {
@@ -422,9 +483,9 @@ cp archetypes/quant/memory.config.patch.json .memory/
   },
 
   "automation": {
-    "human_review_required": true,
+    "human_review_required": false,
     "startup_check": true,
-    "pipeline_steps": ["sync_embeddings", "generate_rules"],
+    "pipeline_steps": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check"],
     "dedup_threshold": 0.85
   },
 
@@ -443,6 +504,8 @@ cp archetypes/quant/memory.config.patch.json .memory/
 
   "v3": {
     "auto_startup": true,
+    "auto_start_on_plan": true,
+    "auto_harvest_on_stop": true,
     "working_memory_dir": ".memory/working",
     "prefill_on_plan_start": true,
     "max_prefill_entries": 5,
@@ -459,7 +522,8 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 |----------|---------|-------------|
 | `${paths.CODE_ROOTS}` | `["src/"]` | Main source directories |
 | `${paths.DOCS_ROOT}` | `"docs/"` | Documentation root |
-| `${paths.INCIDENTS_FILE}` | `"docs/INCIDENTS.md"` | Incident log location |
+
+Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added for project-specific rule scoping. All paths support globs and arrays.
 
 ---
 
@@ -476,6 +540,11 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 ├── working/               # Working memory session files (V3, gitignored)
 ├── rules/
 │   └── verify-core.rules.json   # Core verification rules
+├── hooks/                 # Claude Code hook scripts (V3)
+│   ├── session_start.sh   #   SessionStart → startup health check
+│   ├── pre_edit_search.py #   PreToolUse:Edit|Write → memory search
+│   ├── plan_start.py      #   PreToolUse:EnterPlanMode → auto-start session
+│   └── stop_harvest.py    #   Stop → auto-harvest + persist + pipeline
 ├── lib/                   # Python library modules
 │   ├── text_builder.py    #   Text construction for embedding/dedup
 │   ├── embedder.py        #   Multi-provider embedding (Gemini/OpenAI/Ollama)
@@ -490,8 +559,9 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 │   ├── llm_provider.py    #   Multi-provider LLM abstraction (M6)
 │   ├── prompts.py         #   LLM prompt templates (M6)
 │   ├── reasoning.py       #   LLM reasoning engine (M6)
+│   ├── scanner.py         #   Batch document scanner
 │   ├── init.py            #   Project init & auto-startup (V3 M7)
-│   └── working_memory.py  #   Working memory session management (V3 M8)
+│   └── working_memory.py  #   Working memory + auto-harvest (V3 M8-M9)
 ├── scripts/               # CLI entry points
 │   ├── sync_embeddings.py
 │   ├── search_cli.py
@@ -501,9 +571,10 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 │   ├── pipeline_cli.py
 │   ├── evolution_cli.py
 │   ├── reasoning_cli.py
+│   ├── scan_cli.py        #   Batch document scanner CLI
 │   ├── init_cli.py        #   V3: project init CLI
 │   └── working_memory_cli.py  #  V3: working memory CLI
-└── tests/                 # 566 unit tests
+└── tests/                 # 652 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -516,17 +587,21 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
     ├── test_evolution.py
     ├── test_llm_provider.py
     ├── test_reasoning.py
-    ├── test_init.py        #   V3: init tests
-    ├── test_working_memory.py  #  V3: working memory tests
+    ├── test_scanner.py     #   Batch scanner tests
+    ├── test_init.py        #   V3: init + hooks tests
+    ├── test_working_memory.py  #  V3: working memory + auto-harvest tests
     └── test_lifecycle.py   #   V3: lifecycle automation tests
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
 ├── memory-search.md       # Query workflow
-├── memory-import.md       # Import workflow (dry-run)
+├── memory-import.md       # Import workflow (dry-run, any *.md/*.py/*.ts)
 ├── memory-verify.md       # Integrity check workflow
+├── memory-scan.md         # Batch document scanning
 ├── memory-plan.md         # Working memory session management (V3)
-└── memory-init.md         # Project init command (V3)
+├── memory-init.md         # Project init command (V3)
+├── memory-evolve.md       # Memory health & evolution analysis (V3)
+└── memory-reason.md       # Cross-memory reasoning analysis (V3)
 ```
 
 ---
@@ -535,7 +610,7 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 
 ### 1. Will this system write files automatically?
 
-**No.** All four commands are read-only by default. File writes only happen when you explicitly request them (e.g., "append this to events.jsonl"). The automation engine produces drafts that require human approval.
+**It depends on your configuration.** With `human_review_required: true` (default for template), all commands are read-only — writes require explicit request. With `human_review_required: false`, the V3 automation engine auto-harvests lessons from working memory sessions, writes them to events.jsonl, and runs the pipeline — all via Claude Code hooks with no manual steps.
 
 ### 2. What happens if I run `/memory-search --all`?
 
@@ -627,5 +702,5 @@ MIT — see [LICENSE](LICENSE).
 |-----------|---------|
 | Schema | 1.0 |
 | Config | 1.5 |
-| Commands | 1.2 |
-| V3 Engine | M9 (566 tests) |
+| Commands | 1.2 (9 slash commands) |
+| V3 Engine | M9 (652 tests) |

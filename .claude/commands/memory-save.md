@@ -206,22 +206,23 @@ Tags: leakage, feature-engine, shift, rolling
 
 ## Post-Save: Automation Pipeline (V2)
 
-After writing to `events.jsonl`, remind the user:
+After writing to `events.jsonl`, **automatically run the pipeline** to sync the search index and regenerate Hard rules:
 
-```
-Memory saved. Next steps:
-
-1. Run the full pipeline (sync + rules):
-   python3 .memory/scripts/pipeline_cli.py
-
-2. Or just regenerate rules:
-   python3 .memory/scripts/generate_rules_cli.py
-
-3. Review pending drafts:
-   python3 .memory/scripts/capture_cli.py list
-
-4. Verify all entries:
-   python3 .memory/scripts/verify_cli.py
+```bash
+python3 .memory/scripts/pipeline_cli.py
 ```
 
-To preview rules without writing: `python3 .memory/scripts/generate_rules_cli.py --dry-run`
+This ensures:
+- Search index (`vectors.db`) is updated with the new entry
+- If the entry is Hard, a `.claude/rules/ef-memory/*.md` rule file is generated/updated so it auto-loads in future sessions
+
+After pipeline completes, display:
+
+```
+Memory saved + pipeline complete.
+  - Entry: <entry_id>
+  - Pipeline: sync_embeddings [OK], generate_rules [OK]
+  - Rules updated: .claude/rules/ef-memory/<domain>.md
+```
+
+If pipeline fails, show the error but do not lose the saved entry (it's already in events.jsonl).

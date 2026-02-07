@@ -57,9 +57,62 @@ python3 .memory/scripts/init_cli.py --target /path/to/project
 
 ### Post-init scan
 After writing files, scans the project for advisory suggestions:
-- Documents in `docs/` that could be imported via `/memory-import`
 - Missing `.gitignore` entries for `.memory/working/` and `vectors.db`
-- High-value import targets (INCIDENTS.md, ADR, decisions)
+
+### Auto-scan for existing projects
+
+**When `scan.auto_scan_on_init` is `true` (default)** and the init report
+shows suggestions about importable documents:
+
+1. Automatically run the document scanner:
+   ```bash
+   python3 .memory/scripts/scan_cli.py discover --json
+   ```
+
+2. If documents are found, present the discovery table to the user
+   (same format as `/memory-scan` Step 1):
+
+   ```
+   Found <N> importable documents:
+
+     #  | Score | Path                              | Type   | Status
+     ---|-------|-----------------------------------|--------|--------
+     1  | 0.95  | docs/INCIDENTS.md                 | md     | New
+     2  | 0.88  | docs/DECISIONS.md                 | md     | New
+     ...
+
+   Would you like to import memory from these documents?
+   Enter numbers (e.g., "1,2,3"), "all", "new", or "skip":
+   ```
+
+3. If the user selects documents, proceed with the `/memory-scan`
+   extraction workflow (Step 3–5 from memory-scan.md):
+   - Read each selected document
+   - Extract MEMORY ENTRY candidates using extraction rules
+   - Convert to JSON, validate, dedup
+   - Persist (respecting `human_review_required` config)
+
+4. If the user says "skip", finish init without importing.
+
+**When `scan.auto_scan_on_init` is `false`:**
+- Only show advisory suggestions (old behavior):
+  `> Found 12 documents in docs/ — consider /memory-import to extract knowledge`
+
+### Auto-generate rules (always runs)
+
+After init (and auto-scan if applicable), **always** run the pipeline
+to generate Hard rules and sync search index:
+
+```bash
+python3 .memory/scripts/pipeline_cli.py
+```
+
+This ensures `.claude/rules/ef-memory/*.md` files are created from any
+existing Hard entries in `events.jsonl`. Without this step, memory
+entries are stored but invisible to Claude Code sessions.
+
+If there are no entries in `events.jsonl`, the pipeline completes instantly
+with nothing to generate.
 
 ---
 
@@ -68,7 +121,7 @@ After writing files, scans the project for advisory suggestions:
 Init is idempotent. Running it again:
 - Skips files with existing EF Memory sections (unless `--force`)
 - Merges safely into hooks.json and settings.local.json
-- Updates suggestions based on current project state
+- Auto-scan only triggers if new unimported documents are found
 
 Use `--force` to refresh EF Memory sections (e.g., after config changes
 or version upgrades).
@@ -89,8 +142,9 @@ Merged:
   ~ .claude/settings.local.json
 
 Suggestions:
-  > Found 12 documents in docs/ — consider /memory-import to extract knowledge
   > Consider adding to .gitignore: .memory/working/
+
+Auto-scan: Found 12 importable documents (see table below)
 
 Done (4 files processed, 15ms)
 ```
