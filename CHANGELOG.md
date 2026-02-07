@@ -4,6 +4,27 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-07 — Universal Document Import
+
+### `/memory-import` expanded to support any document type
+
+Previously, `/memory-import` only supported `INCIDENTS.md`. Now it supports **any structured document**: incidents, decisions, architecture docs, ADRs, RFCs, runbooks, retrospectives, READMEs, code comments, changelogs, and more.
+
+**Modified files (4):**
+- `.claude/commands/memory-import.md` — Rewritten for universal document support (v1.0 → v1.1)
+- `.memory/config.json` — Import section: `["INCIDENTS.md"]` → `["*.md", "*.py", "*.ts", "*.js", "*.go"]` + `doc_roots`
+- `.memory/config.schema.json` — Added `doc_roots` property, updated descriptions
+- `README.md` — Updated workflow diagram, config examples, FAQ
+
+**Key changes:**
+- Supported sources expanded from single file to glob patterns (`*.md`, `*.py`, `*.ts`, `*.js`, `*.go`)
+- New `doc_roots` config for default scan directories
+- Document-specific extraction guidance (incidents, decisions, architecture, runbooks, code comments)
+- Three-level source normalization (ideal/acceptable/minimum)
+- New extraction heuristics for decisions, constraints, risks, and breaking changes
+
+---
+
 ## 2026-02-07 — v1.4 M6: LLM Reasoning Layer
 
 ### M6: Layer 3 LLM Reasoning Engine

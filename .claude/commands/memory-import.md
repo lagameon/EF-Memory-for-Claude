@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Extract Hard Memory candidates from structured project documents (primarily `docs/decisions/INCIDENTS.md`) for human review.
+Extract memory candidates from **any structured project document** — incidents, decisions, architecture records, runbooks, retrospectives, README sections, code comments, and more — for human review.
 
-- **Input**: Markdown documents with structured incident/decision records
+- **Input**: Any markdown document, code file, or structured text with extractable knowledge
 - **Output**: MEMORY ENTRY blocks in `/memory-save` format (displayed in response only)
 - **Guarantee**: This command NEVER writes files. Persistence is always a separate, explicit workflow.
 
@@ -12,10 +12,10 @@ Extract Hard Memory candidates from structured project documents (primarily `doc
 
 ## What /memory-import Does
 
-1. User provides (or points to) an INC-xxx section from INCIDENTS.md
-2. Claude extracts 1-N MEMORY ENTRY candidates
+1. User provides (or points to) a document section or file
+2. Claude identifies extractable knowledge (rules, lessons, constraints, decisions, risks, facts)
 3. Each candidate MUST have Rule or Implication (otherwise rejected)
-4. Source is normalized to at least `#INC-xxx` (line numbers are best-effort)
+4. Source is normalized to the document's path + heading/line reference
 5. Human reviews, edits, and decides what to persist via `/memory-save`
 
 ## What /memory-import Does NOT Do
@@ -30,11 +30,22 @@ Extract Hard Memory candidates from structured project documents (primarily `doc
 
 ## Supported Source Documents
 
-| Document | Content Type | Expected Sections |
-|----------|--------------|-------------------|
-| `docs/decisions/INCIDENTS.md` | Incident records | Root Cause, Fix, Regression, Lessons |
+### Any structured document is supported
 
-*DECISIONS.md support planned for Phase 2.*
+| Document Type | Examples | Expected Content |
+|---------------|----------|-----------------|
+| **Incident records** | `INCIDENTS.md`, `postmortems/` | Root cause, fix, lessons learned |
+| **Decision records** | `DECISIONS.md`, `ADR/`, `RFC/` | Context, decision, rationale, consequences |
+| **Architecture docs** | `ARCHITECTURE.md`, `design/` | Constraints, invariants, design rules |
+| **Runbooks / SOPs** | `runbooks/`, `playbooks/` | Procedures, checks, safety rules |
+| **Retrospectives** | `retros/`, `RETROSPECTIVE.md` | Action items, learned patterns |
+| **READMEs** | `README.md`, `CLAUDE.md` | Project constraints, conventions, rules |
+| **Code comments** | `*.py`, `*.ts`, `*.go` | `# LESSON:`, `// CONSTRAINT:`, `TODO(critical)` |
+| **Config / standards** | `.eslintrc`, `pyproject.toml` | Enforcement rules, style constraints |
+| **Changelogs** | `CHANGELOG.md` | Breaking changes, migration rules |
+| **Any markdown** | `docs/**/*.md` | Anything with extractable rules or knowledge |
+
+**The system is document-type agnostic.** If a document contains actionable knowledge with a verifiable source, it can be imported.
 
 ---
 
@@ -42,33 +53,40 @@ Extract Hard Memory candidates from structured project documents (primarily `doc
 
 ### MUST Extract
 
-| Section | Maps To | Required Fields |
-|---------|---------|-----------------|
-| **Root Cause** / 错误原因 | `Content` + `Implication` | What went wrong, why it matters |
-| **Fix** / 修复方案 | `Rule` | MUST/NEVER statement derived from fix |
-| **Regression Check** / 验证 | `Verify` | One-line command or observable check |
-| **Lessons Learned** / 经验教训 | `Content` | Key takeaways (max 4 points) |
+| Content Pattern | Maps To | Required Fields |
+|----------------|---------|-----------------|
+| **Root Cause** / error analysis | `Content` + `Implication` | What went wrong, why it matters |
+| **Fix** / solution / resolution | `Rule` | MUST/NEVER statement derived from fix |
+| **Decision + Rationale** | `Rule` + `Content` | What was decided and why |
+| **Constraint / Invariant** | `Rule` + `Implication` | What must hold true and what breaks |
+| **Regression Check** / verification | `Verify` | One-line command or observable check |
+| **Lessons Learned** / takeaways | `Content` | Key actionable points (max 4) |
+| **Breaking Change** / migration | `Rule` + `Implication` | What changed and what breaks |
 
 ### MUST NOT Extract
 
 | Content Type | Reason |
 |--------------|--------|
-| Timeline / 时间线 | No reuse value; context-specific |
-| Raw logs / 原始日志 | Noise; not actionable |
+| Timeline / chronology | No reuse value; context-specific |
+| Raw logs / stack traces | Noise; not actionable |
 | File listings (unless constraint) | Volatile; likely outdated |
-| Estimated time / 预估时间 | Not a rule or fact |
+| Estimated time / effort | Not a rule or fact |
 | Intermediate discussion | Not a conclusion |
 | Agent handoff notes | Session-specific |
+| Opinions without evidence | Violates evidence-first principle |
 
 ### Extraction Heuristics
 
 ```
-1. If "✅ 修复" or "Fix" section exists → derive Rule
-2. If "🔍 错误详情" or "Root Cause" exists → derive Content + Implication
-3. If "验证" or "Regression" checklist exists → derive Verify
-4. If error caused >10x metric distortion → Severity = S1
-5. If error affected production/live trading → Classification = Hard
-6. If error is calculation/logic bug → Tags include "leakage" or "calculation"
+1. If "Fix", "Solution", "Resolution" section → derive Rule
+2. If "Root Cause", "Why", "Analysis" section → derive Content + Implication
+3. If "Verification", "Regression", "Test" section → derive Verify
+4. If "Decision", "Chosen approach", "We decided" → derive Rule + Implication
+5. If "Constraint", "MUST", "NEVER", "Invariant" → derive Rule
+6. If "Risk", "Warning", "Caveat" → derive Implication
+7. If error caused production impact → Severity = S1, Classification = Hard
+8. If architectural constraint → Classification = Hard
+9. If best practice / preference → Classification = Soft
 ```
 
 ---
@@ -76,10 +94,17 @@ Extract Hard Memory candidates from structured project documents (primarily `doc
 ## Usage
 
 ```
+# Import from any document
 /memory-import docs/decisions/INCIDENTS.md#INC-036
+/memory-import docs/decisions/DECISIONS.md#DEC-057
+/memory-import docs/architecture/ARCHITECTURE.md
+/memory-import docs/runbooks/deployment-checklist.md
+/memory-import README.md#Error-Handling
+/memory-import CLAUDE.md#Protocol-Section
+/memory-import src/core/auth.py           # Extract from code comments
 ```
 
-Or provide the incident content directly in the conversation.
+Or provide the document content directly in the conversation.
 
 ---
 
@@ -89,13 +114,14 @@ Or provide the incident content directly in the conversation.
 
 | Level | Format | When to Use |
 |-------|--------|-------------|
-| **A (Ideal)** | `docs/decisions/INCIDENTS.md#INC-036:L553-L699` | When line numbers are provided or verifiable |
-| **B (Acceptable)** | `docs/decisions/INCIDENTS.md#INC-036` | When exact lines cannot be determined |
+| **A (Ideal)** | `docs/DECISIONS.md#DEC-057:L12-L45` | When line numbers are provided or verifiable |
+| **B (Acceptable)** | `docs/DECISIONS.md#DEC-057` | When exact lines cannot be determined |
+| **C (Minimum)** | `docs/DECISIONS.md` | When no heading anchor is available |
 
 ### Best-Effort Line Numbers
 
 If exact line numbers cannot be determined:
-- Output the stable anchor only (`#INC-036`)
+- Output the stable anchor only (`#DEC-057`, `#Error-Handling`)
 - Annotate with `[Line numbers needed]` if precision is important
 - Human or future tooling (`/memory-verify`) can add line numbers later
 
@@ -108,30 +134,29 @@ If exact line numbers cannot be determined:
 Output follows `/memory-save` MEMORY ENTRY format exactly:
 
 ```
-/memory-import docs/decisions/INCIDENTS.md#INC-036
+/memory-import docs/architecture/ARCHITECTURE.md#Database-Rules
 
-Scanning: INC-036 section
+Scanning: Database-Rules section
 
 ========================================
 IMPORT CANDIDATE #1
 ========================================
 
 MEMORY ENTRY
-Type: lesson
+Type: constraint
 Recommended: Hard
-Severity: S1
-Title: Rolling statistics without shift(1) caused 999x backtest inflation
+Severity: S2
+Title: All database migrations must be backward-compatible for zero-downtime deploys
 Content:
-- 42 rolling/ewm/pct_change calls missing shift(1) in feature engine
-- Model learned to "explain past" not "predict future"
-- IC with T-5 returns (-0.115) > IC with T+1 returns (0.018)
-- Backtest showed 49,979% return; after fix only 52%
-Rule: shift(1) MUST precede any rolling(), ewm(), pct_change() on price-derived data
-Implication: Backtest returns inflated 100-1000x; predictions structurally encode future information
-Verify: grep -rn "rolling\|ewm\|pct_change" src/features/*.py | grep -v "shift(1)"
+- Migrations run while old code is still serving traffic
+- Column drops require a 2-release deprecation cycle
+- New NOT NULL columns must have defaults
+Rule: Database migrations MUST be backward-compatible; NEVER drop columns in the same release they become unused
+Implication: Zero-downtime deployment fails; old pods crash on missing columns
+Verify: Review migration files for DROP COLUMN without prior deprecation release
 Source:
-- docs/decisions/INCIDENTS.md#INC-036
-Tags: leakage, feature-engine, shift, rolling
+- docs/architecture/ARCHITECTURE.md#Database-Rules
+Tags: database, migration, deployment, zero-downtime
 
 ---
 
@@ -139,7 +164,7 @@ Tags: leakage, feature-engine, shift, rolling
 IMPORT SUMMARY
 ========================================
 Candidates extracted: 1
-  - Hard/S1: 1
+  - Hard/S2: 1
 
 ⚠️ REVIEW REQUIRED
 
@@ -156,6 +181,57 @@ To persist this entry:
 
 ---
 
+## Document-Specific Guidance
+
+### Incident Records (INCIDENTS.md, postmortems/)
+
+Focus on: Root cause → Rule, Fix → Verify, Lessons → Content
+```
+Section "Root Cause" → Content + Implication
+Section "Fix" → Rule (derive MUST/NEVER)
+Section "Regression" → Verify
+```
+
+### Decision Records (DECISIONS.md, ADR/)
+
+Focus on: Decision → Rule, Rationale → Content, Consequences → Implication
+```
+Section "Decision" → Rule
+Section "Context" + "Rationale" → Content
+Section "Consequences" → Implication
+Status "Accepted" / "Superseded" → Classification guidance
+```
+
+### Architecture Docs
+
+Focus on: Constraints → Rule, Invariants → Rule + Implication
+```
+"MUST" / "NEVER" / "ALWAYS" statements → Rule
+Diagrams with labeled constraints → Content
+"If violated..." patterns → Implication
+```
+
+### Runbooks / SOPs
+
+Focus on: Critical steps → Rule, Failure modes → Implication
+```
+"Before deploying..." → Rule (MUST check)
+"If X happens..." → Risk entry
+"Never do Y in production" → Constraint entry
+```
+
+### Code Comments
+
+Focus on: `# LESSON:`, `# CONSTRAINT:`, `# WARNING:`, `# INVARIANT:`
+```
+# LESSON: → lesson entry
+# CONSTRAINT: or # INVARIANT: → constraint entry
+# WARNING: or # DANGER: → risk entry
+# DECISION: or # WHY: → decision entry
+```
+
+---
+
 ## Human Review Workflow
 
 ### Review Checklist
@@ -163,13 +239,14 @@ To persist this entry:
 Before persisting any entry, human MUST verify:
 
 ```
-□ Title accurately summarizes the lesson (not just the incident)
+□ Title accurately summarizes the knowledge (not just the document)
 □ Rule is actionable and checkable (MUST/NEVER/ALWAYS)
 □ Implication explains real-world consequence
-□ Source points to correct incident (verify anchor exists)
+□ Source points to correct document section (verify anchor exists)
 □ Content has 2-6 concrete points (no fluff)
 □ Severity matches impact (S1 = invalidates results or production incident)
 □ No timeline, logs, or speculative content included
+□ Entry type matches the knowledge type (decision vs lesson vs constraint)
 ```
 
 ### How to Persist (Human-Driven)
@@ -188,8 +265,9 @@ Before persisting any entry, human MUST verify:
 ### Automatic Rejection
 
 ```
-REJECT if: No Rule AND no Implication can be derived from incident
-REJECT if: Incident has no "Fix" or "修复" section (not actionable)
+REJECT if: No Rule AND no Implication can be derived
+REJECT if: No actionable content exists (purely descriptive)
+REJECT if: Source cannot be identified or verified
 ```
 
 ### Warnings
@@ -197,7 +275,8 @@ REJECT if: Incident has no "Fix" or "修复" section (not actionable)
 ```
 WARN if: Content exceeds 6 bullet points (likely too verbose)
 WARN if: Source section exceeds 200 lines (may need to narrow scope)
-WARN if: No "验证" or "Regression" section (Verify field will be empty)
+WARN if: No verification method can be suggested
+WARN if: Entry duplicates existing memory (suggest checking /memory-search first)
 ```
 
 ---
@@ -217,30 +296,9 @@ WARN if: No "验证" or "Regression" section (Verify field will be empty)
 
 ---
 
-## Limitations (v1.0)
-
-| Not Supported | Reason | Planned |
-|---------------|--------|---------|
-| Automatic persistence | Violates Guardrails | Never |
-| Duplicate detection | Requires reading events.jsonl | Phase 2 |
-| DECISIONS.md import | Different structure | Phase 2 |
-| Batch approval commands | No persistent state | Never |
-| Guaranteed line numbers | Claude cannot reliably determine | Best-effort only |
-
----
-
-## Future Extensions (Phase 2)
-
-- Import from `DECISIONS.md` (DEC-xxx entries)
-- Duplicate detection against existing memory
-- Supersession workflow (mark old entry deprecated)
-- Import from code comments (`# LESSON:` markers)
-- `/memory-verify` to validate and enrich sources
-
----
-
 ## Version
 
 | Version | Date | Notes |
 |---------|------|-------|
 | 1.0 | 2026-02-01 | Initial design, INCIDENTS.md support, read-only |
+| 1.1 | 2026-02-07 | Universal document support, any markdown/code/config |

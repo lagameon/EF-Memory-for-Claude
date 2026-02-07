@@ -113,7 +113,7 @@ This system will ALWAYS:
 
 ```
 ┌─────────────────┐
-│ INCIDENTS.md    │  (your project documents)
+│ Any Document    │  (incidents, decisions, architecture, runbooks, code...)
 └────────┬────────┘
          │
          ▼
@@ -146,7 +146,7 @@ This system will ALWAYS:
 
 | Command | Purpose | Writes Files? |
 |---------|---------|---------------|
-| `/memory-import` | Extract candidates from documents | **Never** |
+| `/memory-import` | Extract candidates from any document | **Never** |
 | `/memory-save` | Format and display entry | **Never** |
 | `/memory-search` | Query existing memory | **Never** |
 | `/memory-verify` | Check integrity | **Never** |
@@ -271,9 +271,15 @@ Edit `.memory/config.json`:
     "CODE_ROOTS": ["src/", "lib/"],
     "DOCS_ROOT": "docs/",
     "INCIDENTS_FILE": "docs/INCIDENTS.md"
+  },
+  "import": {
+    "supported_sources": ["*.md", "*.py", "*.ts", "*.js", "*.go"],
+    "doc_roots": ["docs/", "CLAUDE.md", "README.md"]
   }
 }
 ```
+
+The `import` section defines which file types `/memory-import` can extract from. By default it supports all common document and code formats.
 
 ### Step 3: Choose an archetype (optional)
 
@@ -309,6 +315,11 @@ cp archetypes/quant/memory.config.patch.json .memory/
     "CODE_ROOTS": ["src/"],
     "DOCS_ROOT": "docs/",
     "INCIDENTS_FILE": "docs/INCIDENTS.md"
+  },
+
+  "import": {
+    "supported_sources": ["*.md", "*.py", "*.ts", "*.js", "*.go"],
+    "doc_roots": ["docs/", "CLAUDE.md", "README.md"]
   },
 
   "embedding": {
@@ -450,7 +461,11 @@ Append a new version with the same `id`. The system uses append-only semantics �
 
 Hard entries are automatically injected into `.claude/rules/ef-memory/` (M3) so Claude loads them when editing relevant files.
 
-### 7. Can I use this without Claude Code CLI?
+### 7. What documents can I import from?
+
+**Any structured document.** The system is document-type agnostic. You can import from incidents, decisions, architecture docs, runbooks, retrospectives, READMEs, code comments, changelogs, and any markdown file. Use `/memory-import <path>` with any file that contains extractable knowledge (rules, lessons, constraints, decisions, risks, or facts).
+
+### 8. Can I use this without Claude Code CLI?
 
 The memory format (JSONL + SCHEMA.md) is tool-agnostic. The `.claude/commands/` files are specific to Claude Code CLI but the principles apply anywhere. The Python library modules can be used independently.
 

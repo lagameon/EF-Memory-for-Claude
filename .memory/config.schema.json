@@ -104,16 +104,24 @@
     },
     "import": {
       "type": "object",
+      "description": "Import configuration. Supports any structured document — incidents, decisions, architecture docs, runbooks, code comments, and more.",
       "properties": {
         "supported_sources": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Supported source document types"
+          "default": ["*.md", "*.py", "*.ts", "*.js", "*.go"],
+          "description": "File patterns supported for import (glob-style). Any document with extractable knowledge can be imported."
+        },
+        "doc_roots": {
+          "type": "array",
+          "items": {"type": "string"},
+          "default": ["docs/"],
+          "description": "Default document roots to scan for importable content"
         },
         "require_line_numbers": {
           "type": "boolean",
           "default": false,
-          "description": "Whether to require line numbers in sources"
+          "description": "Whether to require line numbers in sources. When false, heading anchors are acceptable."
         }
       }
     },

@@ -66,7 +66,8 @@
   },
 
   "import": {
-    "supported_sources": ["INCIDENTS.md"],
+    "supported_sources": ["*.md", "*.py", "*.ts", "*.js", "*.go"],
+    "doc_roots": ["docs/", "CLAUDE.md", "README.md"],
     "require_line_numbers": false
   },
 
