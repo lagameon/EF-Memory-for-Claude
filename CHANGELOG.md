@@ -4,6 +4,74 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-07 — v3.0.0 M7-M9: Auto-Startup + Working Memory + Lifecycle
+
+### M7: Project Init & Auto-Startup
+
+One-command initialization that makes every Claude Code session aware of EF Memory. Handles existing projects safely via append/merge strategies.
+
+**New files (4):**
+- `.memory/lib/init.py` — Core init logic (templates, merge, project scan)
+- `.memory/scripts/init_cli.py` — CLI (`--dry-run`, `--force`, `--target`)
+- `.claude/commands/memory-init.md` — `/memory-init` command
+- `.memory/tests/test_init.py` — 65 tests
+
+**Modified files (3):**
+- `.memory/config.json` — v1.4 → v1.5, added `v3` section
+- `.memory/config.schema.json` — Added `v3` schema definition
+- `.memory/lib/__init__.py` — Version 2.0.0 → 3.0.0
+
+**Key features:**
+- Generates CLAUDE.md (Tier 1), .claude/rules/ef-memory-startup.md (Tier 2), hooks.json, settings.local.json
+- Non-destructive merging: CLAUDE.md (append with `<!-- EF-MEMORY-START/END -->` markers), hooks.json (merge), settings.local.json (merge permissions)
+- Idempotent re-runs — skips existing sections unless `--force`
+- Project scanner with advisory suggestions (docs import, gitignore entries)
+
+**Test count: 407 → 472** (+65 tests)
+
+### M8: Working Memory (PWF Integration)
+
+Short-term working memory for multi-step tasks, inspired by Planning with Files. Maintains session files (task_plan.md, findings.md, progress.md) in `.memory/working/`.
+
+**New files (4):**
+- `.memory/lib/working_memory.py` — Session lifecycle + harvest extraction
+- `.memory/scripts/working_memory_cli.py` — CLI (start/resume/status/harvest/clear/read-plan)
+- `.claude/commands/memory-plan.md` — `/memory-plan` command
+- `.memory/tests/test_working_memory.py` — 72 tests
+
+**Modified files (1):**
+- `.gitignore` — Added `.memory/working/`
+
+**Key features:**
+- Auto-prefill: On session start, searches EF Memory and injects relevant entries into findings.md
+- Pattern-based harvest: 6 extraction patterns (LESSON/CONSTRAINT/DECISION/WARNING markers, MUST/NEVER statements, Error/Fix)
+- Session lifecycle: start → work → harvest → /memory-save → clear
+- Deduplication in harvest candidates
+
+**Test count: 472 → 544** (+72 tests)
+
+### M9: Memory Lifecycle Automation
+
+Closed-loop lifecycle: harvest pipeline step + session recovery at startup.
+
+**New files (1):**
+- `.memory/tests/test_lifecycle.py` — 22 tests
+
+**Modified files (4):**
+- `.memory/lib/auto_sync.py` — Added `harvest_check` pipeline step, session recovery in `check_startup`
+- `.memory/scripts/pipeline_cli.py` — Added `--harvest-only` flag
+- `.memory/config.json` — Added `session_recovery` toggle
+- `.memory/config.schema.json` — Added `harvest_check` to pipeline_steps enum
+
+**Key features:**
+- `harvest_check` pipeline step scans working memory for candidates
+- Session recovery at startup detects stale `.memory/working/` sessions
+- Active session info included in startup hint string
+
+**Test count: 544 → 566** (+22 tests)
+
+---
+
 ## 2026-02-07 — Human Review Toggle
 
 ### `human_review_required` config flag

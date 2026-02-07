@@ -45,34 +45,40 @@ This system solves that by enforcing:
 
 ```
                     ┌──────────────────────────────────────────────┐
-                    │            EF Memory V2 Runtime               │
+                    │            EF Memory V3 Runtime               │
                     │                                              │
-  Event Sources      │   Layer 3: LLM Reasoning                    │
-  ─────────────     │   ├── Cross-memory correlation               │
-  · file edit       │   ├── Contradiction detection                │
-  · test fail/pass  │   ├── Knowledge synthesis                    │
-  · git commit      │   └── Context-aware risk assessment          │
-  · manual /cmd     │                                              │
+  Event Sources      │   Layer 4: Working Memory (V3)               │
+  ─────────────     │   ├── Session files (task_plan / findings)   │
+  · file edit       │   ├── Auto-prefill from long-term memory     │
+  · test fail/pass  │   └── Harvest extraction → /memory-save      │
+  · git commit      │                                              │
+  · manual /cmd     │   Layer 3: LLM Reasoning                    │
+  · /memory-plan    │   ├── Cross-memory correlation               │
+       │            │   ├── Contradiction detection                │
+       │            │   ├── Knowledge synthesis                    │
+       │            │   └── Context-aware risk assessment          │
+       │            │                                              │
        │            │   Layer 2: Semantic Retrieval                │
        │            │   ├── Embedding (Gemini / OpenAI / Ollama)   │
        │            │   ├── BM25 full-text search (FTS5)           │
-       │            │   └── Hybrid search + Re-rank                │
-       ▼            │                                              │
-  ┌─────────┐       │   Layer 1: Structured Rules                  │
-  │ Drafts  │──────▶│   ├── .claude/rules/ Bridge (auto-inject)    │
-  │ (queue) │       │   └── Hard entries → domain rule files       │
-  └─────────┘       │                                              │
-       │            │   Storage: events.jsonl (source of truth)    │
-       │ human      │   Index:   vectors.db (SQLite, derived)      │
-       │ approval   │   Cache:   .claude/rules/ef-memory/ (derived)│
-       ▼            └──────────────────────────────────────────────┘
-  events.jsonl
+       ▼            │   └── Hybrid search + Re-rank                │
+  ┌─────────┐       │                                              │
+  │ Drafts  │──────▶│   Layer 1: Structured Rules                  │
+  │ (queue) │       │   ├── .claude/rules/ Bridge (auto-inject)    │
+  └─────────┘       │   └── Hard entries → domain rule files       │
+       │            │                                              │
+       │ human      │   Storage: events.jsonl (source of truth)    │
+       │ approval   │   Index:   vectors.db (SQLite, derived)      │
+       ▼            │   Cache:   .claude/rules/ef-memory/ (derived)│
+  events.jsonl      └──────────────────────────────────────────────┘
+
                     Automation Engine:
                     ├── Auto-Verify:  schema + source drift detection
                     ├── Auto-Capture: event → draft queue → approval
                     ├── Auto-Sync:    events.jsonl → vectors.db + FTS
                     ├── Auto-Evolve:  dedup / confidence decay / deprecation
-                    └── Auto-Reason:  LLM correlation / contradiction / synthesis
+                    ├── Auto-Reason:  LLM correlation / contradiction / synthesis
+                    └── Auto-Harvest: working memory → memory candidates (V3)
 ```
 
 ### Three-Layer Retrieval (4-Level Degradation)
@@ -177,6 +183,8 @@ Or tell Claude: **"turn off memory review"** / **"turn on memory review"**
 | `/memory-save` | Format and display entry | **Never** |
 | `/memory-search` | Query existing memory | **Never** |
 | `/memory-verify` | Check integrity | **Never** |
+| `/memory-plan` | Working memory session management (V3) | Session files only |
+| `/memory-init` | Initialize auto-startup files (V3) | Config files only |
 
 ---
 
@@ -272,6 +280,58 @@ All reasoning functions are **advisory only** — they never modify events.jsonl
 
 ---
 
+## V3 Capabilities
+
+EF Memory V3 adds automatic startup, working memory, and lifecycle automation:
+
+### M7: Project Init & Auto-Startup
+One-command initialization generates all Claude Code integration files. Safe merge for existing projects — CLAUDE.md is appended (not overwritten), hooks.json and settings are merged.
+
+```bash
+python3 .memory/scripts/init_cli.py                    # Init current project
+python3 .memory/scripts/init_cli.py --dry-run           # Preview changes
+python3 .memory/scripts/init_cli.py --force             # Overwrite existing files
+python3 .memory/scripts/init_cli.py --target /path/to   # Init another project
+```
+
+Generated files: `CLAUDE.md` (EF Memory section), `.claude/rules/ef-memory-startup.md`, `.claude/hooks.json`, `.claude/settings.local.json`.
+
+### M8: Working Memory (PWF Integration)
+Session-scoped working memory inspired by Planning with Files. Three markdown files (`task_plan.md`, `findings.md`, `progress.md`) in `.memory/working/` act as short-term RAM while EF Memory serves as long-term disk.
+
+```bash
+python3 .memory/scripts/working_memory_cli.py start "refactor auth module"  # Start session
+python3 .memory/scripts/working_memory_cli.py status                        # Check progress
+python3 .memory/scripts/working_memory_cli.py resume                        # Resume session
+python3 .memory/scripts/working_memory_cli.py harvest                       # Extract memory candidates
+python3 .memory/scripts/working_memory_cli.py clear                         # End session
+```
+
+Or use the `/memory-plan` command for the full workflow.
+
+**Auto-prefill**: On session start, EF Memory is searched and relevant entries are injected into `findings.md`.
+
+**Harvest patterns**: LESSON, CONSTRAINT, DECISION, WARNING markers, MUST/NEVER statements, and Error→Fix pairs are automatically extracted as `/memory-save` candidates.
+
+### M9: Memory Lifecycle Automation
+Closed-loop lifecycle: start session → work → harvest → save → next session auto-prefill.
+
+- **harvest_check pipeline step**: Scans working memory for harvestable candidates
+- **Session recovery**: Detects stale working memory sessions at startup
+- **Startup hint**: Reports active session task and progress in health check
+
+```bash
+python3 .memory/scripts/pipeline_cli.py --harvest-only   # Run harvest step
+python3 .memory/scripts/pipeline_cli.py --startup         # Shows active session info
+```
+
+**Lifecycle flow**:
+```
+/memory-plan start → prefill findings.md → work → harvest → /memory-save → pipeline sync → next session
+```
+
+---
+
 ## Quick Start (3 Steps)
 
 ### Step 1: Copy to your project
@@ -336,7 +396,7 @@ cp archetypes/quant/memory.config.patch.json .memory/
 ```json
 {
   "$schema": "./config.schema.json",
-  "version": "1.4",
+  "version": "1.5",
 
   "paths": {
     "CODE_ROOTS": ["src/"],
@@ -379,6 +439,14 @@ cp archetypes/quant/memory.config.patch.json .memory/
     "fallback": ["openai", "gemini"],
     "max_tokens": 4096,
     "token_budget": 16000
+  },
+
+  "v3": {
+    "auto_startup": true,
+    "working_memory_dir": ".memory/working",
+    "prefill_on_plan_start": true,
+    "max_prefill_entries": 5,
+    "session_recovery": true
   }
 }
 ```
@@ -400,14 +468,15 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 ```
 .memory/
 ├── SCHEMA.md              # Storage contract (v1.0)
-├── config.json            # Project configuration (v1.4)
+├── config.json            # Project configuration (v1.5)
 ├── config.schema.json     # JSON Schema for config
 ├── events.jsonl           # Memory storage (append-only)
 ├── vectors.db             # Vector + FTS5 index (derived, gitignored)
 ├── drafts/                # Draft queue (pending human approval)
+├── working/               # Working memory session files (V3, gitignored)
 ├── rules/
 │   └── verify-core.rules.json   # Core verification rules
-├── lib/                   # Python library modules (V2)
+├── lib/                   # Python library modules
 │   ├── text_builder.py    #   Text construction for embedding/dedup
 │   ├── embedder.py        #   Multi-provider embedding (Gemini/OpenAI/Ollama)
 │   ├── vectordb.py        #   SQLite vector storage + FTS5
@@ -416,11 +485,13 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 │   ├── generate_rules.py  #   Hard entry → .claude/rules/ bridge
 │   ├── auto_verify.py     #   Schema/source/staleness/dedup validation
 │   ├── auto_capture.py    #   Draft queue management
-│   ├── auto_sync.py       #   Pipeline orchestration
+│   ├── auto_sync.py       #   Pipeline orchestration + harvest
 │   ├── evolution.py       #   Memory health & lifecycle (M5)
 │   ├── llm_provider.py    #   Multi-provider LLM abstraction (M6)
 │   ├── prompts.py         #   LLM prompt templates (M6)
-│   └── reasoning.py       #   LLM reasoning engine (M6)
+│   ├── reasoning.py       #   LLM reasoning engine (M6)
+│   ├── init.py            #   Project init & auto-startup (V3 M7)
+│   └── working_memory.py  #   Working memory session management (V3 M8)
 ├── scripts/               # CLI entry points
 │   ├── sync_embeddings.py
 │   ├── search_cli.py
@@ -429,8 +500,10 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
 │   ├── capture_cli.py
 │   ├── pipeline_cli.py
 │   ├── evolution_cli.py
-│   └── reasoning_cli.py
-└── tests/                 # 407 unit tests
+│   ├── reasoning_cli.py
+│   ├── init_cli.py        #   V3: project init CLI
+│   └── working_memory_cli.py  #  V3: working memory CLI
+└── tests/                 # 566 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -442,13 +515,18 @@ Rules reference paths using `${paths.CODE_ROOTS}` syntax:
     ├── test_auto_sync.py
     ├── test_evolution.py
     ├── test_llm_provider.py
-    └── test_reasoning.py
+    ├── test_reasoning.py
+    ├── test_init.py        #   V3: init tests
+    ├── test_working_memory.py  #  V3: working memory tests
+    └── test_lifecycle.py   #   V3: lifecycle automation tests
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
 ├── memory-search.md       # Query workflow
 ├── memory-import.md       # Import workflow (dry-run)
-└── memory-verify.md       # Integrity check workflow
+├── memory-verify.md       # Integrity check workflow
+├── memory-plan.md         # Working memory session management (V3)
+└── memory-init.md         # Project init command (V3)
 ```
 
 ---
@@ -548,6 +626,6 @@ MIT — see [LICENSE](LICENSE).
 | Component | Version |
 |-----------|---------|
 | Schema | 1.0 |
-| Config | 1.4 |
-| Commands | 1.1 |
-| V2 Engine | M6 (407 tests) |
+| Config | 1.5 |
+| Commands | 1.2 |
+| V3 Engine | M9 (566 tests) |
