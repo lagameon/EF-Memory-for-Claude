@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EF Memory V2 — Automation Pipeline CLI
+EF Memory V3 — Automation Pipeline CLI
 
 Run sync + rules generation pipeline, or startup health check.
 
@@ -9,6 +9,7 @@ Usage:
     python3 .memory/scripts/pipeline_cli.py --startup          # Startup status check
     python3 .memory/scripts/pipeline_cli.py --sync-only        # Just sync embeddings
     python3 .memory/scripts/pipeline_cli.py --rules-only       # Just generate rules
+    python3 .memory/scripts/pipeline_cli.py --harvest-only     # Just harvest working memory
     python3 .memory/scripts/pipeline_cli.py --help             # Show help
 """
 
@@ -31,6 +32,7 @@ def _parse_args(argv: list) -> dict:
         "startup": False,
         "sync_only": False,
         "rules_only": False,
+        "harvest_only": False,
         "help": False,
     }
     for arg in argv:
@@ -42,6 +44,8 @@ def _parse_args(argv: list) -> dict:
             args["sync_only"] = True
         elif arg == "--rules-only":
             args["rules_only"] = True
+        elif arg == "--harvest-only":
+            args["harvest_only"] = True
         elif arg.startswith("--"):
             print(f"ERROR: Unknown option: {arg}")
             sys.exit(1)
@@ -55,6 +59,8 @@ def _print_startup(report):
     print(f"  Pending drafts:   {report.pending_drafts}")
     print(f"  Stale entries:    {report.stale_entries}")
     print(f"  Source warnings:  {report.source_warnings}")
+    if report.active_session:
+        print(f"  Active session:   \"{report.active_session_task}\" ({report.active_session_phases})")
     print()
     print(f"  {report.hint}")
     print(f"\n  Duration: {report.duration_ms:.0f}ms")
@@ -128,6 +134,8 @@ def main():
         steps = ["sync_embeddings"]
     elif args["rules_only"]:
         steps = ["generate_rules"]
+    elif args["harvest_only"]:
+        steps = ["harvest_check"]
 
     report = run_pipeline(events_path, config, project_root, steps=steps)
     _print_pipeline(report)

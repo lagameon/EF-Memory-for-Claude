@@ -1,9 +1,9 @@
 """
-EF Memory V2 — Auto-Sync (Pipeline Orchestration)
+EF Memory V3 — Auto-Sync (Pipeline Orchestration)
 
 Orchestrates the automation pipeline:
-  - run_pipeline: sync embeddings + generate rules + evolution check + reasoning check
-  - check_startup: lightweight health check for session start
+  - run_pipeline: sync embeddings + generate rules + evolution + reasoning + harvest
+  - check_startup: lightweight health check for session start (incl. session recovery)
 
 Reuses existing modules:
   - sync.sync_embeddings (M1)
@@ -12,6 +12,7 @@ Reuses existing modules:
   - auto_capture.list_drafts (M4.2)
   - evolution.build_evolution_report (M5)
   - reasoning.build_reasoning_report (M6)
+  - working_memory.harvest_session, get_session_status (M8)
 
 No external dependencies — pure Python stdlib + internal modules.
 """
@@ -41,7 +42,7 @@ logger = logging.getLogger("efm.auto_sync")
 @dataclass
 class StepResult:
     """Result of a single pipeline step."""
-    step: str = ""               # "sync_embeddings" | "generate_rules" | "evolution_check" | "reasoning_check"
+    step: str = ""               # "sync_embeddings" | "generate_rules" | "evolution_check" | "reasoning_check" | "harvest_check"
     success: bool = True
     skipped: bool = False
     skip_reason: str = ""
@@ -67,6 +68,9 @@ class StartupReport:
     stale_entries: int = 0
     source_warnings: int = 0
     total_entries: int = 0
+    active_session: bool = False
+    active_session_task: str = ""
+    active_session_phases: str = ""       # e.g., "1/3 done"
     hint: str = ""
     duration_ms: float = 0.0
 
@@ -89,6 +93,7 @@ def run_pipeline(
         "generate_rules"   — regenerate .claude/rules/ef-memory/*.md from Hard entries
         "evolution_check"  — run evolution report (duplicates, confidence, deprecations)
         "reasoning_check"  — run LLM reasoning report (correlations, contradictions, synthesis)
+        "harvest_check"    — scan working memory for harvestable candidates (M9)
 
     Each step is isolated: failure in one doesn't block others.
     Embedding disabled → sync still updates FTS index.
@@ -114,6 +119,8 @@ def run_pipeline(
             result = _run_evolution_step(events_path, config, project_root)
         elif step_name == "reasoning_check":
             result = _run_reasoning_step(events_path, config, project_root)
+        elif step_name == "harvest_check":
+            result = _run_harvest_step(events_path, config, project_root)
         else:
             result = StepResult(
                 step=step_name,
@@ -321,6 +328,55 @@ def _run_reasoning_step(
     return result
 
 
+def _run_harvest_step(
+    events_path: Path,
+    config: dict,
+    project_root: Path,
+) -> StepResult:
+    """Run the harvest_check step (M9 — scan working memory for candidates)."""
+    result = StepResult(step="harvest_check")
+
+    try:
+        from .working_memory import harvest_session, get_session_status
+
+        v3_config = config.get("v3", {})
+        working_dir_rel = v3_config.get("working_memory_dir", ".memory/working")
+        working_dir = project_root / working_dir_rel
+
+        # Check if there's an active session
+        status = get_session_status(working_dir)
+        if not status.active:
+            result.skipped = True
+            result.skip_reason = "No active working memory session"
+            return result
+
+        # Run harvest
+        harvest_report = harvest_session(working_dir, events_path, config)
+
+        result.success = True
+        result.details = {
+            "candidates_found": len(harvest_report.candidates),
+            "findings_scanned": harvest_report.findings_scanned,
+            "progress_scanned": harvest_report.progress_scanned,
+            "candidate_types": _count_candidate_types(harvest_report.candidates),
+        }
+
+    except Exception as e:
+        result.success = False
+        result.error = str(e)
+        logger.error(f"harvest_check step failed: {e}")
+
+    return result
+
+
+def _count_candidate_types(candidates) -> dict:
+    """Count candidates by type for reporting."""
+    counts: Dict[str, int] = {}
+    for c in candidates:
+        counts[c.suggested_type] = counts.get(c.suggested_type, 0) + 1
+    return counts
+
+
 # ---------------------------------------------------------------------------
 # Startup health check
 # ---------------------------------------------------------------------------
@@ -338,7 +394,8 @@ def check_startup(
     1. Count pending drafts
     2. Count stale entries (>threshold days)
     3. Spot-check source file existence on a sample of entries
-    4. Format startup hint string
+    4. Detect active working memory session (session recovery)
+    5. Format startup hint string
     """
     report = StartupReport()
     start_time = time.monotonic()
@@ -387,7 +444,25 @@ def check_startup(
 
     report.source_warnings = source_issues
 
-    # 4. Format hint
+    # 4. Session recovery — detect active working memory session
+    try:
+        from .working_memory import get_session_status as _get_wm_status
+
+        v3_config = config.get("v3", {})
+        working_dir_rel = v3_config.get("working_memory_dir", ".memory/working")
+        working_dir = project_root / working_dir_rel
+        wm_status = _get_wm_status(working_dir)
+
+        if wm_status.active:
+            report.active_session = True
+            report.active_session_task = wm_status.task_description
+            report.active_session_phases = (
+                f"{wm_status.phases_done}/{wm_status.phases_total} done"
+            )
+    except Exception:
+        pass  # Working memory module not available — skip silently
+
+    # 5. Format hint
     report.hint = _format_hint(report)
 
     report.duration_ms = (time.monotonic() - start_time) * 1000
@@ -397,6 +472,10 @@ def check_startup(
 def _format_hint(report: StartupReport) -> str:
     """Format the startup hint string."""
     parts = []
+
+    if report.active_session:
+        task_preview = report.active_session_task[:50]
+        parts.append(f"active session: \"{task_preview}\" ({report.active_session_phases})")
 
     if report.pending_drafts > 0:
         parts.append(f"{report.pending_drafts} pending drafts")

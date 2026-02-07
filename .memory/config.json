@@ -135,6 +135,7 @@
     "working_memory_dir": ".memory/working",
     "harvest_on_compact": true,
     "prefill_on_plan_start": true,
-    "max_prefill_entries": 5
+    "max_prefill_entries": 5,
+    "session_recovery": true
   }
 }

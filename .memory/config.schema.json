@@ -225,7 +225,7 @@
         },
         "pipeline_steps": {
           "type": "array",
-          "items": {"type": "string", "enum": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check"]},
+          "items": {"type": "string", "enum": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check", "harvest_check"]},
           "default": ["sync_embeddings", "generate_rules"],
           "description": "Ordered pipeline steps to run"
         },
@@ -421,6 +421,11 @@
           "minimum": 1,
           "maximum": 20,
           "description": "Maximum memory entries to inject into findings.md on plan start"
+        },
+        "session_recovery": {
+          "type": "boolean",
+          "default": true,
+          "description": "Detect and report stale working memory sessions at startup"
         }
       }
     }
