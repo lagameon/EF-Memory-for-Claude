@@ -196,7 +196,7 @@ def generate_hooks_settings() -> dict:
                 "hooks": [
                     {
                         "type": "command",
-                        "command": f"{_cd}bash .memory/hooks/session_start.sh",
+                        "command": f"{_cd}python3 .memory/scripts/pipeline_cli.py --startup 2>/dev/null || true",
                         "timeout": 15,
                         "statusMessage": "EF Memory startup check",
                     }
@@ -305,15 +305,19 @@ def merge_settings_json(
                 settings["hooks"][event_name] = hook_groups
             else:
                 # Check if EF Memory hooks already exist
-                # Match by .memory/hooks/ path OR [EF Memory] marker in command
+                # Match by .memory/ path OR [EF Memory] marker in command
                 # Remove old EFM hooks and replace with new ones (handles
-                # upgrades, e.g. relative→absolute path prefix changes)
+                # upgrades, e.g. relative→absolute path prefix, bash→python)
                 non_efm_groups = []
                 for group in settings["hooks"][event_name]:
                     is_efm = False
                     for h in group.get("hooks", []):
                         cmd = h.get("command", "")
-                        if ".memory/hooks/" in cmd or "[EF Memory]" in cmd:
+                        msg = h.get("statusMessage", "")
+                        if (".memory/hooks/" in cmd
+                                or ".memory/scripts/" in cmd
+                                or "[EF Memory]" in cmd
+                                or "EF Memory" in msg):
                             is_efm = True
                             break
                     if not is_efm:

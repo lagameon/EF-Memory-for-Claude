@@ -87,10 +87,18 @@ class TestBuildDedupText(unittest.TestCase):
         self.assertIn(entry["title"], text)
         self.assertIn(entry["rule"], text)
 
-    def test_contains_source(self):
+    def test_excludes_source_uses_content(self):
+        """Dedup text focuses on semantic content, not source paths."""
         entry = SAMPLE_ENTRIES[0]
         text = build_dedup_text(entry)
-        self.assertIn(entry["source"][0], text)
+        # Source paths should NOT be in dedup text (prevents false negatives)
+        for src in entry.get("source", []):
+            self.assertNotIn(src, text)
+        # Content should be present for semantic dedup
+        if entry.get("content"):
+            content_str = " ".join(entry["content"]) if isinstance(entry["content"], list) else entry["content"]
+            # At least part of content should be in the text
+            self.assertTrue(any(part in text for part in content_str.split()[:3]))
 
 
 class TestBuildFtsFields(unittest.TestCase):

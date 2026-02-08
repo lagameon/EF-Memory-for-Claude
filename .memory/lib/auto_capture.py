@@ -24,7 +24,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from .auto_verify import ValidationResult, validate_schema, verify_entry
+from .auto_verify import (
+    ValidationResult,
+    _load_entries_latest_wins,
+    validate_schema,
+    verify_entry,
+)
 
 logger = logging.getLogger("efm.auto_capture")
 
@@ -327,9 +332,13 @@ def review_drafts(
     report.total_drafts = len(drafts)
     report.drafts = drafts
 
+    # Pre-load entries once to avoid re-reading events.jsonl per draft
+    preloaded = _load_entries_latest_wins(events_path) if events_path.exists() else {}
+
     for draft in drafts:
         verify_result = verify_entry(
-            draft.entry, events_path, project_root, config
+            draft.entry, events_path, project_root, config,
+            _preloaded_entries=preloaded,
         )
         report.verification_results.append(verify_result)
 

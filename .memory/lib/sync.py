@@ -54,46 +54,26 @@ def _compute_text_hash(text: str) -> str:
 def _read_events(
     events_path: Path,
     start_line: int = 0,
-) -> tuple[dict[str, dict], int]:
+    byte_offset: int = 0,
+) -> tuple[dict[str, dict], int, int]:
     """
     Read events.jsonl and resolve latest-wins semantics.
 
-    Args:
-        events_path: Path to events.jsonl
-        start_line: Line number to start reading from (0-based)
+    Thin wrapper around :func:`events_io.load_events_latest_wins`.
 
     Returns:
-        (entries_dict, total_lines)
-        entries_dict: {entry_id: latest_entry_dict}
-        total_lines: total number of non-empty lines in file
+        (entries_dict, total_lines, end_byte_offset)
+        entries_dict: {entry_id: latest_entry_dict} (with ``_line`` metadata)
+        total_lines: total number of lines in file
+        end_byte_offset: byte position at end of file for cursor storage
     """
-    entries: dict[str, dict] = {}
-    total_lines = 0
-
-    if not events_path.exists():
-        return entries, 0
-
-    with open(events_path, "r", encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            total_lines = i + 1  # Track total lines (including blank) for cursor
-            line = line.strip()
-            if not line:
-                continue
-
-            if i < start_line:
-                continue
-
-            try:
-                entry = json.loads(line)
-                entry_id = entry.get("id")
-                if entry_id:
-                    # Store with line number for cursor tracking
-                    entry["_line"] = i
-                    entries[entry_id] = entry
-            except json.JSONDecodeError as e:
-                logger.warning(f"Skipping invalid JSON at line {i + 1}: {e}")
-
-    return entries, total_lines
+    from .events_io import load_events_latest_wins
+    return load_events_latest_wins(
+        events_path,
+        start_line=start_line,
+        track_lines=True,
+        byte_offset=byte_offset,
+    )
 
 
 def sync_embeddings(
@@ -119,13 +99,15 @@ def sync_embeddings(
     report = SyncReport()
     start_time = time.monotonic()
 
-    # Determine sync mode
+    # Determine sync mode — prefer byte offset for faster incremental sync
     cursor = None if force_full else vectordb.get_sync_cursor()
-    start_line = cursor if cursor is not None else 0
     report.mode = "incremental" if cursor is not None and not force_full else "full"
 
-    # Read entries
-    entries, total_lines = _read_events(events_path, start_line=start_line)
+    # Read entries — use byte_offset when available for O(new_entries) instead of O(total)
+    byte_cursor = cursor if (cursor is not None and cursor > 0) else 0
+    entries, total_lines, end_byte_offset = _read_events(
+        events_path, byte_offset=byte_cursor,
+    )
     report.entries_scanned = len(entries)
 
     if not entries:
@@ -158,7 +140,12 @@ def sync_embeddings(
         embed_text = build_embedding_text(entry)
         text_hash = _compute_text_hash(embed_text)
 
-        # Always update FTS (cheap, local)
+        # Check if content has changed (hash mismatch or new entry)
+        if not vectordb.needs_update(entry_id, text_hash):
+            report.entries_skipped += 1
+            continue
+
+        # Update FTS only for changed/new entries (not all active entries)
         fts_fields = build_fts_fields(entry)
         vectordb.upsert_fts(
             entry_id=entry_id,
@@ -166,11 +153,6 @@ def sync_embeddings(
             text=fts_fields["text"],
             tags=fts_fields["tags"],
         )
-
-        # Check if vector needs update
-        if not vectordb.needs_update(entry_id, text_hash):
-            report.entries_skipped += 1
-            continue
 
         if embedder is None:
             report.entries_fts_only += 1
@@ -219,7 +201,7 @@ def sync_embeddings(
     # When errors exist, don't advance — failed entries will be retried
     # on the next incremental sync.
     if not report.errors:
-        vectordb.set_sync_cursor(total_lines)
+        vectordb.set_sync_cursor(end_byte_offset)
     else:
         logger.warning(
             f"Sync had {len(report.errors)} errors — cursor NOT advanced. "

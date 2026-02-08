@@ -93,12 +93,18 @@ def _read_all_lines(events_path: Path) -> List[str]:
 
 
 def _resolve_latest_wins(raw_lines: List[str]) -> Tuple[
-    Dict[str, dict],      # latest_wins: {id: entry}
-    Dict[str, int],        # latest_line_idx: {id: line_index}
+    Dict[str, dict],                    # latest_wins: {id: entry}
+    Dict[str, int],                      # latest_line_idx: {id: line_index}
+    List[Tuple[int, str, dict]],         # all_parsed: [(line_idx, entry_id, entry)]
 ]:
-    """Build latest-wins dict and track which line index holds the latest version."""
+    """Build latest-wins dict, track line indices, and return all parsed entries.
+
+    The all_parsed list eliminates the need for callers to re-parse raw lines
+    when identifying superseded entries (saves one full JSON parse pass).
+    """
     latest: Dict[str, dict] = {}
     latest_idx: Dict[str, int] = {}
+    all_parsed: List[Tuple[int, str, dict]] = []
     for i, line in enumerate(raw_lines):
         try:
             entry = json.loads(line)
@@ -106,9 +112,10 @@ def _resolve_latest_wins(raw_lines: List[str]) -> Tuple[
             if entry_id:
                 latest[entry_id] = entry
                 latest_idx[entry_id] = i
+                all_parsed.append((i, entry_id, entry))
         except json.JSONDecodeError:
             continue
-    return latest, latest_idx
+    return latest, latest_idx, all_parsed
 
 
 def _archive_lines(
@@ -215,7 +222,7 @@ def get_compaction_stats(events_path: Path, threshold: float = 2.0) -> Compactio
     if not raw_lines:
         return stats
 
-    latest, latest_idx = _resolve_latest_wins(raw_lines)
+    latest, latest_idx, _all_parsed = _resolve_latest_wins(raw_lines)
     stats.unique_entries = len(latest)
 
     # Count active vs deprecated
@@ -271,8 +278,8 @@ def compact(
         report.duration_ms = (time.monotonic() - start_time) * 1000
         return report
 
-    # Step 2: Resolve latest-wins
-    latest, latest_idx = _resolve_latest_wins(raw_lines)
+    # Step 2: Resolve latest-wins (single parse pass for all lines)
+    latest, latest_idx, all_parsed = _resolve_latest_wins(raw_lines)
 
     # Step 3: Partition into KEEP and ARCHIVE
     keep_entries: List[dict] = []
@@ -288,19 +295,12 @@ def compact(
             archive_entries.append(entry)
             archived_ids.add(entry_id)
 
-    # Also archive all superseded lines (older versions of any ID)
-    for i, line in enumerate(raw_lines):
-        try:
-            entry = json.loads(line)
-            entry_id = entry.get("id")
-            if not entry_id:
-                continue
-            # If this line is NOT the latest version for this ID, archive it
-            if latest_idx.get(entry_id) != i:
-                archive_entries.append(entry)
-                archived_ids.add(entry_id)
-        except json.JSONDecodeError:
-            continue
+    # Archive all superseded lines (older versions of any ID)
+    # Uses pre-parsed entries from _resolve_latest_wins — no second JSON parse
+    for i, entry_id, entry in all_parsed:
+        if latest_idx.get(entry_id) != i:
+            archive_entries.append(entry)
+            archived_ids.add(entry_id)
 
     report.entries_kept = len(keep_entries)
     report.lines_archived = len(archive_entries)

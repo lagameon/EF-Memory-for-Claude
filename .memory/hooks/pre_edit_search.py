@@ -69,7 +69,7 @@ def main():
         if config_path.exists():
             config = json.loads(config_path.read_text())
 
-        results = search_memory(query, events_path, config, max_results=3)
+        results = search_memory(query, events_path, config=config, max_results=3)
 
         if results:
             lines = [f"[EF Memory] Relevant entries for {rel_path}:"]

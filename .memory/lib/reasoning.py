@@ -513,7 +513,12 @@ def detect_contradictions(
                                 confidence=float(c.get("confidence", 0.7)),
                             ))
                 if llm_pairs:
-                    report.pairs = llm_pairs
+                    # Merge: keep heuristic pairs not covered by LLM
+                    llm_keys = {(p.entry_id_a, p.entry_id_b) for p in llm_pairs}
+                    merged = [p for p in report.pairs
+                              if (p.entry_id_a, p.entry_id_b) not in llm_keys]
+                    merged.extend(llm_pairs)
+                    report.pairs = merged
                     report.mode = "llm_enriched"
 
     report.duration_ms = (time.monotonic() - t0) * 1000
@@ -617,7 +622,12 @@ def suggest_syntheses(
                                 rationale=s.get("rationale", ""),
                             ))
                 if llm_suggestions:
-                    report.suggestions = llm_suggestions
+                    # Merge: keep heuristic suggestions not covered by LLM
+                    llm_keys = {frozenset(s.source_entry_ids) for s in llm_suggestions}
+                    merged = [s for s in report.suggestions
+                              if frozenset(s.source_entry_ids) not in llm_keys]
+                    merged.extend(llm_suggestions)
+                    report.suggestions = merged
                     report.mode = "llm_enriched"
 
     report.duration_ms = (time.monotonic() - t0) * 1000
@@ -740,7 +750,12 @@ def assess_risks(
                             related_entry_ids=a.get("related_entry_ids", []),
                         ))
                 if llm_annotations:
-                    report.annotations = llm_annotations
+                    # Merge: keep heuristic annotations not covered by LLM
+                    llm_keys = {a.entry_id for a in llm_annotations}
+                    merged = [a for a in report.annotations
+                              if a.entry_id not in llm_keys]
+                    merged.extend(llm_annotations)
+                    report.annotations = merged
                     report.mode = "llm_enriched"
 
     report.duration_ms = (time.monotonic() - t0) * 1000

@@ -441,17 +441,25 @@ def check_startup(
     }
     report.total_entries = len(active_entries)
 
-    # Compaction stats (fast, read-only)
+    # Compaction stats — computed inline from already-loaded entries to avoid
+    # a second full parse of events.jsonl via get_compaction_stats().
     try:
-        from .compaction import get_compaction_stats
         compact_threshold = config.get("compaction", {}).get(
             "auto_suggest_threshold", 2.0
         )
-        compact_stats = get_compaction_stats(events_path, threshold=compact_threshold)
-        report.compaction_suggested = compact_stats.suggest_compact
-        report.waste_ratio = compact_stats.waste_ratio
+        # Cheap line count (no JSON parsing)
+        total_lines = 0
+        if events_path.exists():
+            with open(events_path, "r", encoding="utf-8") as f:
+                total_lines = sum(1 for line in f if line.strip())
+        active_count = len(active_entries)
+        if active_count > 0:
+            report.waste_ratio = round(total_lines / active_count, 2)
+        elif total_lines > 0:
+            report.waste_ratio = float(total_lines)
+        report.compaction_suggested = report.waste_ratio >= compact_threshold
     except Exception:
-        pass  # Compaction module unavailable — skip silently
+        pass  # Compaction stats unavailable — skip silently
 
     threshold = config.get("verify", {}).get("staleness_threshold_days", 90)
     report.staleness_threshold_days = threshold

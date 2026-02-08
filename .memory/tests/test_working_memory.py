@@ -939,15 +939,20 @@ class TestAutoHarvestAndPersist(unittest.TestCase):
         # _convert_candidate_to_entry for "LESSON: Always validate input..."
         # produces title="Always validate input before processing", rule=None,
         # source=[".memory/working/findings.md:L0-L0"].
-        # build_dedup_text uses: title | source, so the existing entry must
-        # have matching title and similar source for >0.85 similarity.
+        # build_dedup_text uses: title | rule | content.  The harvested candidate
+        # will have content like "Always validate input before processing\n
+        # Extracted via: Explicit LESSON: marker".  The existing entry must have
+        # similar title + content for >0.85 SequenceMatcher similarity.
         existing_entry = {
             "id": "lesson-existing-aaaabbbb",
             "type": "lesson",
             "classification": "soft",
             "severity": "S3",
             "title": "Always validate input before processing",
-            "content": ["Validate all user input"],
+            "content": [
+                "Always validate input before processing",
+                "Extracted via: Explicit LESSON: marker",
+            ],
             "rule": None,
             "source": [".memory/working/findings.md:L0-L0"],
             "tags": ["validation"],

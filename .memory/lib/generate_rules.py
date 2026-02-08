@@ -134,26 +134,10 @@ def _load_hard_entries(events_path: Path) -> tuple[List[dict], int]:
     - hard_entries: sorted by severity (S1 first, then S2, S3, None)
     - total_scanned: count of all unique entries resolved (latest-wins)
 
-    Uses latest-wins semantics for duplicate entry IDs.
+    Uses latest-wins semantics via :func:`events_io.load_events_latest_wins`.
     """
-    entries_by_id: Dict[str, dict] = {}
-
-    if not events_path.exists():
-        return [], 0
-
-    with open(events_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                entry_id = entry.get("id")
-                if entry_id:
-                    entries_by_id[entry_id] = entry
-            except json.JSONDecodeError:
-                continue
-
+    from .events_io import load_events_latest_wins
+    entries_by_id, _total, _offset = load_events_latest_wins(events_path)
     total_scanned = len(entries_by_id)
 
     # Filter: hard + not deprecated

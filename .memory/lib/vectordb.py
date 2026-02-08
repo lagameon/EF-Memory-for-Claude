@@ -12,6 +12,7 @@ Storage:
 Performance: brute-force cosine over 5000 entries × 768 dims < 10ms.
 """
 
+import heapq
 import math
 import sqlite3
 import struct
@@ -56,7 +57,7 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
         norm_b += bv * bv
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
-    return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+    return dot / math.sqrt(norm_a * norm_b)
 
 
 # ---------------------------------------------------------------------------
@@ -275,14 +276,12 @@ class VectorDB:
             f"SELECT entry_id, embedding, dimensions FROM vectors {where}"
         ).fetchall()
 
-        results: List[Tuple[str, float]] = []
-        for entry_id, blob, dims in rows:
-            stored_vec = unpack_vector(blob, dims)
-            sim = cosine_similarity(query_vec, stored_vec)
-            results.append((entry_id, sim))
-
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:limit]
+        scored = (
+            (cosine_similarity(query_vec, unpack_vector(blob, dims)), entry_id)
+            for entry_id, blob, dims in rows
+        )
+        top = heapq.nlargest(limit, scored, key=lambda x: x[0])
+        return [(entry_id, sim) for sim, entry_id in top]
 
     # --- FTS operations ---
 

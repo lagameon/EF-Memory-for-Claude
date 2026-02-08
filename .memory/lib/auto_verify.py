@@ -570,27 +570,12 @@ def check_staleness(entry: dict, threshold_days: int = 90) -> StalenessResult:
 # ---------------------------------------------------------------------------
 
 def _load_entries_latest_wins(events_path: Path) -> Dict[str, dict]:
-    """Load entries from events.jsonl with latest-wins semantics."""
-    entries: Dict[str, dict] = {}
-    if not events_path.exists():
-        return entries
+    """Load entries from events.jsonl with latest-wins semantics.
 
-    try:
-        with open(events_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    entry_id = entry.get("id")
-                    if entry_id:
-                        entries[entry_id] = entry
-                except json.JSONDecodeError:
-                    continue
-    except OSError:
-        pass
-
+    Thin wrapper around :func:`events_io.load_events_latest_wins`.
+    """
+    from .events_io import load_events_latest_wins
+    entries, _total, _offset = load_events_latest_wins(events_path)
     return entries
 
 

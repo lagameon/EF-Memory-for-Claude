@@ -236,7 +236,7 @@ class TestGenerateHooksSettings(unittest.TestCase):
         self.assertEqual(group["matcher"], "")
         hook = group["hooks"][0]
         self.assertEqual(hook["type"], "command")
-        self.assertIn("session_start.sh", hook["command"])
+        self.assertIn("pipeline_cli.py --startup", hook["command"])
 
     def test_pre_tool_use_edit_write_matcher(self):
         hooks = generate_hooks_settings()

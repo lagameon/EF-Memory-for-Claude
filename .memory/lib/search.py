@@ -23,11 +23,16 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
-from .embedder import EmbeddingProvider
-from .text_builder import build_query_text
-from .vectordb import VectorDB
+# Lazy imports: embedder/vectordb/text_builder are heavy modules (sqlite3, HTTP
+# clients, etc.) that are NOT needed for basic search mode.  By deferring them
+# to the functions that actually use them, the pre_edit_search hook (which always
+# degrades to basic mode) avoids ~20-40 ms of unnecessary import overhead.
+if TYPE_CHECKING:
+    from .embedder import EmbeddingProvider
+    from .text_builder import build_query_text  # noqa: F401
+    from .vectordb import VectorDB
 
 logger = logging.getLogger("efm.search")
 
@@ -103,25 +108,10 @@ def _load_entries(events_path: Path) -> Dict[str, dict]:
     Load all entries from events.jsonl, resolving latest-wins.
 
     Returns {entry_id: latest_entry_dict}, excluding deprecated entries.
+    Thin wrapper around :func:`events_io.load_events_latest_wins`.
     """
-    entries: Dict[str, dict] = {}
-
-    if not events_path.exists():
-        return entries
-
-    with open(events_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                entry_id = entry.get("id")
-                if entry_id:
-                    entries[entry_id] = entry
-            except json.JSONDecodeError:
-                continue
-
+    from .events_io import load_events_latest_wins
+    entries, _total, _offset = load_events_latest_wins(events_path)
     # Filter out deprecated entries
     return {
         eid: e for eid, e in entries.items()
@@ -135,8 +125,8 @@ def _load_entries(events_path: Path) -> Dict[str, dict]:
 
 def _search_hybrid(
     query: str,
-    vectordb: VectorDB,
-    embedder: EmbeddingProvider,
+    vectordb: "VectorDB",
+    embedder: "EmbeddingProvider",
     entries: Dict[str, dict],
     weights: dict,
     context: Optional[dict],
@@ -147,6 +137,8 @@ def _search_hybrid(
 
     Combines FTS5 keyword matching with semantic vector similarity.
     """
+    from .text_builder import build_query_text
+
     fetch_limit = max_results * 3  # Over-fetch for merging
 
     # BM25 scores (already normalized relative to result set by search_fts)
@@ -203,8 +195,8 @@ def _search_hybrid(
 
 def _search_vector(
     query: str,
-    vectordb: VectorDB,
-    embedder: EmbeddingProvider,
+    vectordb: "VectorDB",
+    embedder: "EmbeddingProvider",
     entries: Dict[str, dict],
     weights: dict,
     context: Optional[dict],
@@ -213,6 +205,8 @@ def _search_vector(
     """
     Level 2: Pure vector search (no FTS5 available).
     """
+    from .text_builder import build_query_text
+
     fetch_limit = max_results * 3
 
     query_text = build_query_text(query, context)
@@ -246,7 +240,7 @@ def _search_vector(
 
 def _search_keyword(
     query: str,
-    vectordb: VectorDB,
+    vectordb: "VectorDB",
     entries: Dict[str, dict],
     weights: dict,
     max_results: int,
@@ -360,8 +354,8 @@ def _search_basic(
 # ---------------------------------------------------------------------------
 
 def _determine_mode(
-    vectordb: Optional[VectorDB],
-    embedder: Optional[EmbeddingProvider],
+    vectordb: Optional["VectorDB"],
+    embedder: Optional["EmbeddingProvider"],
     force_mode: Optional[str] = None,
 ) -> tuple[str, bool, str]:
     """
@@ -402,8 +396,8 @@ def _determine_mode(
 def search_memory(
     query: str,
     events_path: Path,
-    vectordb: Optional[VectorDB] = None,
-    embedder: Optional[EmbeddingProvider] = None,
+    vectordb: Optional["VectorDB"] = None,
+    embedder: Optional["EmbeddingProvider"] = None,
     config: Optional[dict] = None,
     context: Optional[dict] = None,
     max_results: Optional[int] = None,

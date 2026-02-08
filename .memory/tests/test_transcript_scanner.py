@@ -494,7 +494,10 @@ class TestScanDedupAgainstEvents(unittest.TestCase):
                 "classification": "soft",
                 "severity": "S3",
                 "title": "always validate input before processing data",
-                "content": ["Validate all input"],
+                "content": [
+                    "always validate input before processing data",
+                    "Extracted via: Explicit LESSON: marker",
+                ],
                 "rule": None,
                 "source": ["conversation:old"],
                 "tags": ["validation"],

@@ -96,8 +96,9 @@ def build_dedup_text(entry: dict) -> str:
     """
     Construct a shorter text for deduplication similarity checks.
 
-    Focuses on the identity of the entry (title + rule + source)
-    rather than full detail, to detect near-duplicate entries.
+    Focuses on the *semantic content* of the entry (title + rule + content)
+    rather than metadata like source paths, so that entries describing the
+    same concept from different files are correctly detected as near-duplicates.
     """
     parts: list[str] = []
 
@@ -109,11 +110,12 @@ def build_dedup_text(entry: dict) -> str:
     if rule:
         parts.append(rule)
 
-    sources = entry.get("source", [])
-    if isinstance(sources, list):
-        for src in sources:
-            if src:
-                parts.append(src)
+    content = entry.get("content")
+    if content:
+        if isinstance(content, list):
+            parts.append(" ".join(content))
+        else:
+            parts.append(str(content))
 
     return " | ".join(parts)
 

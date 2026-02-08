@@ -90,6 +90,10 @@ def main():
 
         sys.exit(0)
 
+    # --- Active session path: collect all output parts, print once at end ---
+    output_parts = []
+    decision = None  # Only set for non-auto-harvest block
+
     auto_harvest = v3_config.get("auto_harvest_on_stop", True)
 
     if auto_harvest:
@@ -117,19 +121,17 @@ def main():
             if report["errors"]:
                 lines.append(f"  Errors: {'; '.join(report['errors'])}")
 
-            result = {"additionalContext": "\n".join(lines)}
-            print(json.dumps(result))
+            output_parts.append("\n".join(lines))
 
         except Exception as e:
-            # On failure, fall back to block + remind
-            result = {
-                "decision": "block",
-                "reason": f"[EF Memory] Auto-harvest failed: {e}. Consider /memory-save manually.",
-            }
-            print(json.dumps(result))
+            # Never block stopping due to harvest failure
+            output_parts.append(
+                f"[EF Memory] Auto-harvest error: {e}. "
+                f"Review .memory/working/ manually if needed."
+            )
     else:
         # Old behavior: block + remind
-        result = {
+        decision = {
             "decision": "block",
             "reason": (
                 "[EF Memory] Active working session detected. Before stopping, consider: "
@@ -138,11 +140,11 @@ def main():
                 "Say 'done' to stop without saving."
             ),
         }
-        print(json.dumps(result))
 
     # Auto-compact if waste ratio exceeds threshold
     try:
-        sys.path.insert(0, str(_MEMORY_DIR))
+        if _MEMORY_DIR not in [Path(p) for p in sys.path]:
+            sys.path.insert(0, str(_MEMORY_DIR))
         from lib.compaction import get_compaction_stats, compact
 
         compact_config = config.get("compaction", {})
@@ -153,17 +155,24 @@ def main():
 
         stats = get_compaction_stats(events_path, threshold=threshold)
         if stats.suggest_compact:
-            report = compact(events_path, archive_dir, config)
-            if report.lines_archived > 0:
-                # Non-blocking: just report in additionalContext
-                compact_msg = (
+            compact_report = compact(events_path, archive_dir, config)
+            if compact_report.lines_archived > 0:
+                output_parts.append(
                     f"[EF Memory] Auto-compacted events.jsonl: "
-                    f"{report.lines_before} → {report.lines_after} lines, "
-                    f"{report.lines_archived} archived to {report.quarters_touched}"
+                    f"{compact_report.lines_before} → {compact_report.lines_after} lines, "
+                    f"{compact_report.lines_archived} archived to {compact_report.quarters_touched}"
                 )
-                print(json.dumps({"additionalContext": compact_msg}))
     except Exception:
         pass  # Never block stopping on compact failure
+
+    # --- Unified output: single JSON to stdout ---
+    if decision:
+        # Block path (auto_harvest=false): output the block decision
+        print(json.dumps(decision))
+    elif output_parts:
+        # Non-blocking: merge all parts into one additionalContext
+        result = {"additionalContext": "\n".join(output_parts)}
+        print(json.dumps(result))
 
     sys.exit(0)
 
