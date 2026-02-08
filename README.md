@@ -370,6 +370,29 @@ Session ends (Stop hook)
 - Never blocks — only returns `additionalContext` (informational)
 - Configurable via `v3.auto_draft_from_conversation` toggle
 
+### M11: events.jsonl Compaction + Time-Sharded Archive
+`events.jsonl` is append-only and accumulates superseded versions and deprecated entries. M11 adds compaction to keep the hot file clean and archive history by quarter.
+
+**How it works**:
+```
+events.jsonl grows over time (superseded lines, deprecated entries)
+  ↓
+Waste ratio exceeds threshold (default 2.0×)
+  ↓ Auto-trigger on session stop OR manual /memory-compact
+compact(events_path, archive_dir, config)
+  → resolve latest-wins (one line per ID)
+  → partition: KEEP (active) vs ARCHIVE (superseded + deprecated)
+  → archive by quarter → .memory/archive/events_YYYYQN.jsonl
+  → atomic rewrite events.jsonl (os.replace)
+  → reset vectordb sync cursor
+  → log to compaction_log.jsonl
+```
+
+**Key design properties**:
+- Zero consumer changes — all loaders read `events.jsonl` as before, just smaller
+- Atomic rewrite — crash-safe via `os.replace()`
+- Auto + manual — Stop hook auto-compacts above threshold; `/memory-compact` for manual control
+
 ---
 
 ## Automation & Hooks
@@ -413,6 +436,11 @@ reasoning_check  → Cross-memory correlation, contradiction detection, synthesi
   "automation": {
     "human_review_required": false,  // Auto-persist after validation
     "pipeline_steps": ["sync_embeddings", "generate_rules", "evolution_check", "reasoning_check"]
+  },
+  "compaction": {
+    "auto_suggest_threshold": 2.0,   // Waste ratio to trigger auto-compact
+    "archive_dir": ".memory/archive",
+    "sort_output": true
   },
   "embedding": { "enabled": false },  // Set true + API key for vector search
   "reasoning": { "enabled": false }   // Set true + API key for LLM reasoning
@@ -874,5 +902,5 @@ MIT — see [LICENSE](LICENSE).
 |-----------|---------|
 | Schema | 1.0 |
 | Config | 1.5 |
-| Commands | 1.2 (9 slash commands) |
-| V3 Engine | M10 (670 tests) |
+| Commands | 1.3 (10 slash commands) |
+| V3 Engine | M11 (711 tests) |

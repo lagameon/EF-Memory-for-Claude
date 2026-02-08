@@ -152,6 +152,12 @@
     ]
   },
 
+  "compaction": {
+    "auto_suggest_threshold": 2.0,
+    "archive_dir": ".memory/archive",
+    "sort_output": true
+  },
+
   "v3": {
     "auto_startup": true,
     "working_memory_dir": ".memory/working",

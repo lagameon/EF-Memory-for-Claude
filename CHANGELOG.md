@@ -4,6 +4,37 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-08 — V3 M11: events.jsonl Compaction + Time-Sharded Archive
+
+### M11: Hot/Archive Compaction
+
+`events.jsonl` is append-only and accumulates superseded versions and deprecated entries over time. M11 adds compaction to resolve the hot file and archive removed lines by quarter.
+
+**New files (3):**
+- `.memory/lib/compaction.py` — Core compaction engine: `compact()`, `get_compaction_stats()`, atomic rewrite, quarterly archive partitioning, sync cursor reset, audit logging
+- `.memory/scripts/compact_cli.py` — CLI with `--stats`, `--dry-run`, and run modes
+- `.claude/commands/memory-compact.md` — `/memory-compact` slash command
+
+**New test file (1):**
+- `.memory/tests/test_compaction.py` — 28 tests (quarter key parsing, compaction algorithm, stats calculation, startup hint integration, auto-compact on stop)
+
+**Modified files (4):**
+- `.memory/hooks/stop_harvest.py` — Auto-compact after session harvest when waste ratio ≥ threshold
+- `.memory/lib/auto_sync.py` — Startup hint shows compaction suggestion when waste ratio exceeds threshold
+- `.memory/config.json` — Added `compaction` section (threshold, archive_dir, sort_output)
+- `.memory/config.schema.json` — Added `compaction` object schema
+
+**Key design:**
+- **Zero consumer changes**: All 8+ loaders continue reading `events.jsonl` unchanged — it's just smaller
+- **Hot/Archive split**: `events.jsonl` = clean (one line per active entry), `archive/events_YYYYQN.jsonl` = quarterly history
+- **Atomic rewrite**: `os.replace(tmp, events.jsonl)` — POSIX crash-safe
+- **Auto-trigger**: Stop hook runs compaction when waste ratio ≥ 2.0× (configurable)
+- **Manual trigger**: `/memory-compact` or `python3 .memory/scripts/compact_cli.py`
+
+**Test count: 683 → 711** (+28 tests)
+
+---
+
 ## 2026-02-07 — V3 M10: Conversation Context Auto-Save
 
 ### M10: Conversation Transcript Scanning → Draft Queue

@@ -72,6 +72,8 @@ class StartupReport:
     active_session_task: str = ""
     active_session_phases: str = ""       # e.g., "1/3 done"
     staleness_threshold_days: int = 90    # Used in hint formatting
+    compaction_suggested: bool = False
+    waste_ratio: float = 0.0
     hint: str = ""
     duration_ms: float = 0.0
 
@@ -416,6 +418,18 @@ def check_startup(
     }
     report.total_entries = len(active_entries)
 
+    # Compaction stats (fast, read-only)
+    try:
+        from .compaction import get_compaction_stats
+        compact_threshold = config.get("compaction", {}).get(
+            "auto_suggest_threshold", 2.0
+        )
+        compact_stats = get_compaction_stats(events_path, threshold=compact_threshold)
+        report.compaction_suggested = compact_stats.suggest_compact
+        report.waste_ratio = compact_stats.waste_ratio
+    except Exception:
+        pass  # Compaction module unavailable — skip silently
+
     threshold = config.get("verify", {}).get("staleness_threshold_days", 90)
     report.staleness_threshold_days = threshold
     for entry in active_entries.values():
@@ -490,6 +504,9 @@ def _format_hint(report: StartupReport) -> str:
 
     if report.stale_entries > 0:
         parts.append(f"{report.stale_entries} stale entries (>{report.staleness_threshold_days}d)")
+
+    if report.compaction_suggested:
+        parts.append(f"compact suggested ({report.waste_ratio:.1f}x waste)")
 
     if parts:
         return f"EF Memory: {' / '.join(parts)}"

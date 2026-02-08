@@ -208,16 +208,26 @@ In these cases, `deprecated: true` alone is sufficient.
 ```
 .memory/
 ├── SCHEMA.md           # This document
-├── events.jsonl        # All memory entries (append-only)
+├── events.jsonl        # Hot file — one line per active entry (compacted)
 ├── index.json          # Optional: tag index for fast search
-└── archive/            # Optional: deprecated entries backup
-    └── events_2026Q1.jsonl
+└── archive/            # Compacted history, sharded by quarter
+    ├── events_2026Q1.jsonl
+    ├── events_2026Q2.jsonl
+    └── compaction_log.jsonl   # Audit log of compaction operations
 ```
 
 **Write behavior**:
 - New entries: append to `events.jsonl`
 - Updates: append new version with same `id` (latest wins)
 - Deletions: set `deprecated: true`, do not remove line
+
+**Compaction** (`/memory-compact`):
+- Resolves `events.jsonl` to one line per active entry (latest-wins, no deprecated)
+- Superseded and deprecated lines archived to `archive/events_YYYYQN.jsonl` by quarter
+- Atomic rewrite via `os.replace()` — crash-safe
+- Resets vectordb sync cursor to force full re-sync
+- Auto-triggers on session stop when waste ratio ≥ threshold (default 2.0×)
+- Archive files are append-only; `compaction_log.jsonl` records each operation
 
 ---
 
@@ -226,3 +236,4 @@ In these cases, `deprecated: true` alone is sufficient.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-02-01 | Initial schema |
+| 1.1 | 2026-02-08 | Document compaction + time-sharded archive |

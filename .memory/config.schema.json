@@ -425,6 +425,29 @@
         }
       }
     },
+    "compaction": {
+      "type": "object",
+      "description": "M11 Compaction and time-sharded archive configuration",
+      "properties": {
+        "auto_suggest_threshold": {
+          "type": "number",
+          "default": 2.0,
+          "minimum": 1.1,
+          "maximum": 10.0,
+          "description": "Waste ratio (total_lines / active_entries) above which compaction is suggested and auto-triggered on stop"
+        },
+        "archive_dir": {
+          "type": "string",
+          "default": ".memory/archive",
+          "description": "Directory for time-sharded archive files"
+        },
+        "sort_output": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sort compacted entries by created_at in the hot file"
+        }
+      }
+    },
     "v3": {
       "type": "object",
       "description": "V3 Auto-Startup and Working Memory configuration",

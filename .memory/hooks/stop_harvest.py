@@ -140,6 +140,31 @@ def main():
         }
         print(json.dumps(result))
 
+    # Auto-compact if waste ratio exceeds threshold
+    try:
+        sys.path.insert(0, str(_MEMORY_DIR))
+        from lib.compaction import get_compaction_stats, compact
+
+        compact_config = config.get("compaction", {})
+        threshold = compact_config.get("auto_suggest_threshold", 2.0)
+        archive_rel = compact_config.get("archive_dir", ".memory/archive")
+        archive_dir = _PROJECT_ROOT / archive_rel
+        events_path = _MEMORY_DIR / "events.jsonl"
+
+        stats = get_compaction_stats(events_path, threshold=threshold)
+        if stats.suggest_compact:
+            report = compact(events_path, archive_dir, config)
+            if report.lines_archived > 0:
+                # Non-blocking: just report in additionalContext
+                compact_msg = (
+                    f"[EF Memory] Auto-compacted events.jsonl: "
+                    f"{report.lines_before} → {report.lines_after} lines, "
+                    f"{report.lines_archived} archived to {report.quarters_touched}"
+                )
+                print(json.dumps({"additionalContext": compact_msg}))
+    except Exception:
+        pass  # Never block stopping on compact failure
+
     sys.exit(0)
 
 
