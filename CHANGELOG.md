@@ -58,7 +58,7 @@ Normal conversations (without Plan Mode) now get scanned for memory-worthy patte
 - **Safety**: Never blocks stopping, graceful degradation, 10MB transcript limit, config toggle
 - **Source attribution**: Draft entries tagged with `conversation:{session_id}` source
 
-**Test count: 652 → 670** (+18 tests)
+**Test count: 652 → 670** (+18 tests), later +13 dedup/rules-echo tests → 683
 
 ---
 

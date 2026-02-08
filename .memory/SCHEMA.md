@@ -1,4 +1,4 @@
-# .memory/SCHEMA.md — Memory Events Schema v1.0
+# .memory/SCHEMA.md — Memory Events Schema v1.1
 
 ---
 

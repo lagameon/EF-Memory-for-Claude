@@ -1,6 +1,6 @@
 # EF Memory for Claude
 
-> Evidence-first project memory for Claude Code — structured JSONL storage, hybrid search (embedding + FTS5), auto-harvest from conversations & plan sessions, 9 slash commands, fully automated via hooks.
+> Evidence-first project memory for Claude Code — structured JSONL storage, hybrid search (embedding + FTS5), auto-harvest from conversations & plan sessions, 10 slash commands, compaction + time-sharded archive, fully automated via hooks.
 
 A **safe, auditable memory skill system** that turns project incidents, constraints, and hard-earned lessons into reusable engineering knowledge. Inspired by the workspace memory architecture of [OpenClaw](https://github.com/pinkpixel-dev/OpenClaw) (moltbot) — but built specifically for Claude Code's skill system with evidence-first guarantees.
 
@@ -78,7 +78,8 @@ This system solves that by enforcing:
                     ├── Auto-Sync:    events.jsonl → vectors.db + FTS
                     ├── Auto-Evolve:  dedup / confidence decay / deprecation
                     ├── Auto-Reason:  LLM correlation / contradiction / synthesis
-                    └── Auto-Harvest: working memory → memory candidates (V3)
+                    ├── Auto-Harvest: working memory → memory candidates (V3)
+                    └── Auto-Compact: hot/archive split + quarterly sharding (V3)
 ```
 
 ### Three-Layer Retrieval (4-Level Degradation)
@@ -193,6 +194,7 @@ Or tell Claude: **"turn off memory review"** / **"turn on memory review"**
 | `/memory-init` | Initialize auto-startup files (V3) | `CLAUDE.md`, `.claude/rules/`, `settings.local.json` (permissions + 5 hooks), `hooks.json` (legacy) |
 | `/memory-evolve` | Memory health & evolution analysis (V3) | Never (read-only report) |
 | `/memory-reason` | Cross-memory reasoning analysis (V3) | Never (read-only report) |
+| `/memory-compact` | Compact events.jsonl + archive history (V3) | `events.jsonl` (rewrite), `archive/` (append) |
 
 ---
 
@@ -406,7 +408,7 @@ EF Memory uses **Claude Code hooks** for event-driven automation — no backgrou
 | **SessionStart** | Session begins | `session_start.sh` | Startup health check (<100ms) |
 | **PreToolUse: Edit\|Write** | Before file edit | `pre_edit_search.py` | Search memory for relevant entries |
 | **PreToolUse: EnterPlanMode** | Plan mode entry | `plan_start.py` | Auto-start working memory session |
-| **Stop** | Response complete | `stop_harvest.py` | Auto-harvest session OR scan conversation → drafts |
+| **Stop** | Response complete | `stop_harvest.py` | Auto-harvest session OR scan conversation → drafts; auto-compact if waste ratio ≥ threshold |
 | **PreCompact** | Context compaction | echo | Reminder to preserve session state |
 
 ### Pipeline Steps
@@ -693,6 +695,12 @@ cp archetypes/quant/memory.config.patch.json .memory/
     "token_budget": 16000
   },
 
+  "compaction": {
+    "auto_suggest_threshold": 2.0,
+    "archive_dir": ".memory/archive",
+    "sort_output": true
+  },
+
   "v3": {
     "auto_startup": true,
     "auto_start_on_plan": true,
@@ -723,13 +731,16 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 
 ```
 .memory/
-├── SCHEMA.md              # Storage contract (v1.0)
+├── SCHEMA.md              # Storage contract (v1.1)
 ├── config.json            # Project configuration (v1.5)
 ├── config.schema.json     # JSON Schema for config
 ├── events.jsonl           # Memory storage (append-only)
 ├── vectors.db             # Vector + FTS5 index (derived, gitignored)
 ├── drafts/                # Draft queue (pending human approval)
 ├── working/               # Working memory session files (V3, gitignored)
+├── archive/               # Compacted history by quarter (gitignored)
+│   ├── events_YYYYQN.jsonl    # Quarterly archive shards
+│   └── compaction_log.jsonl   # Compaction audit log
 ├── rules/
 │   └── verify-core.rules.json   # Core verification rules
 ├── hooks/                 # Claude Code hook scripts (V3)
@@ -754,7 +765,8 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── scanner.py         #   Batch document scanner
 │   ├── init.py            #   Project init & auto-startup (V3 M7)
 │   ├── working_memory.py  #   Working memory + auto-harvest (V3 M8-M9)
-│   └── transcript_scanner.py # Conversation transcript scan → drafts (V3 M10)
+│   ├── transcript_scanner.py # Conversation transcript scan → drafts (V3 M10)
+│   └── compaction.py      #   events.jsonl compaction + archive (V3 M11)
 ├── scripts/               # CLI entry points
 │   ├── sync_embeddings.py
 │   ├── search_cli.py
@@ -766,8 +778,9 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── reasoning_cli.py
 │   ├── scan_cli.py        #   Batch document scanner CLI
 │   ├── init_cli.py        #   V3: project init CLI
-│   └── working_memory_cli.py  #  V3: working memory CLI
-└── tests/                 # 670 unit tests
+│   ├── working_memory_cli.py  #  V3: working memory CLI
+│   └── compact_cli.py     #   V3: compaction CLI (--stats, --dry-run)
+└── tests/                 # 711 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -784,7 +797,8 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
     ├── test_init.py        #   V3: init + hooks tests
     ├── test_working_memory.py  #  V3: working memory + auto-harvest tests
     ├── test_lifecycle.py   #   V3: lifecycle automation tests
-    └── test_transcript_scanner.py # V3: conversation scan → drafts tests
+    ├── test_transcript_scanner.py # V3: conversation scan → drafts tests
+    └── test_compaction.py  #   V3: compaction + archive tests
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
@@ -795,7 +809,8 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 ├── memory-plan.md         # Working memory session management (V3)
 ├── memory-init.md         # Project init command (V3)
 ├── memory-evolve.md       # Memory health & evolution analysis (V3)
-└── memory-reason.md       # Cross-memory reasoning analysis (V3)
+├── memory-reason.md       # Cross-memory reasoning analysis (V3)
+└── memory-compact.md      # Compaction + archive management (V3)
 ```
 
 ---
@@ -809,7 +824,7 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 - **`human_review_required: true`** (template default): `/memory-save`, `/memory-import`, and `/memory-scan` display candidates but require explicit approval before writing to `events.jsonl`.
 - **`human_review_required: false`**: These commands auto-persist after schema validation.
 - **Always writes** (regardless of setting): `/memory-init` creates config/hook files, `/memory-plan` creates session files in `.memory/working/`.
-- **V3 hooks**: The Stop hook auto-harvests working memory sessions → `events.jsonl`, and scans conversations → `.memory/drafts/` (drafts always require manual approval).
+- **V3 hooks**: The Stop hook auto-harvests working memory sessions → `events.jsonl`, scans conversations → `.memory/drafts/` (drafts always require manual approval), and auto-compacts when waste ratio exceeds threshold.
 - **Never writes**: `/memory-search`, `/memory-verify`, `/memory-evolve`, `/memory-reason` are always read-only.
 
 ### 2. What happens if I run `/memory-search --all`?
@@ -861,8 +876,9 @@ The memory format (JSONL + SCHEMA.md) is tool-agnostic. The `.claude/commands/` 
 All memory lives in `.memory/events.jsonl`:
 
 - **One JSON object per line** (strict JSONL)
-- **Append-only** — never modify existing lines
+- **Append-only** — new entries appended, updates append new version with same `id` (latest wins)
 - **Git-tracked** — full audit history
+- **Compactable** — `/memory-compact` resolves to one line per active entry, archives history to `.memory/archive/events_YYYYQN.jsonl`
 
 See `.memory/SCHEMA.md` for field definitions.
 
@@ -900,7 +916,7 @@ MIT — see [LICENSE](LICENSE).
 
 | Component | Version |
 |-----------|---------|
-| Schema | 1.0 |
+| Schema | 1.1 |
 | Config | 1.5 |
 | Commands | 1.3 (10 slash commands) |
 | V3 Engine | M11 (711 tests) |
