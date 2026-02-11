@@ -1511,5 +1511,135 @@ class TestSessionLevelDedup(unittest.TestCase):
         self.assertIn("session_dedup_skipped", result1)
 
 
+# ===========================================================================
+# Test: is_session_complete
+# ===========================================================================
+
+class TestIsSessionComplete(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.working_dir = Path(self.tmpdir) / "working"
+        self.working_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir)
+
+    def test_no_plan_file(self):
+        from lib.working_memory import is_session_complete
+        self.assertFalse(is_session_complete(self.working_dir))
+
+    def test_incomplete_session(self):
+        from lib.working_memory import is_session_complete
+        plan = _generate_task_plan("test")
+        (self.working_dir / TASK_PLAN_FILE).write_text(plan)
+        self.assertFalse(is_session_complete(self.working_dir))
+
+    def test_complete_session(self):
+        from lib.working_memory import is_session_complete
+        plan = """## Phases
+### Phase 1: Investigation [DONE]
+### Phase 2: Implementation [DONE]
+### Phase 3: Verification [DONE]
+"""
+        (self.working_dir / TASK_PLAN_FILE).write_text(plan)
+        self.assertTrue(is_session_complete(self.working_dir))
+
+    def test_partial_session(self):
+        from lib.working_memory import is_session_complete
+        plan = """## Phases
+### Phase 1: Investigation [DONE]
+### Phase 2: Implementation
+### Phase 3: Verification
+"""
+        (self.working_dir / TASK_PLAN_FILE).write_text(plan)
+        self.assertFalse(is_session_complete(self.working_dir))
+
+
+# ===========================================================================
+# Test: is_session_stale
+# ===========================================================================
+
+class TestIsSessionStale(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.working_dir = Path(self.tmpdir) / "working"
+        self.working_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir)
+
+    def test_no_session_not_stale(self):
+        from lib.working_memory import is_session_stale
+        self.assertFalse(is_session_stale(self.working_dir))
+
+    def test_fresh_session_not_stale(self):
+        from lib.working_memory import is_session_stale
+        (self.working_dir / TASK_PLAN_FILE).write_text("# Plan\n")
+        self.assertFalse(is_session_stale(self.working_dir, timeout_hours=48.0))
+
+    def test_old_session_is_stale(self):
+        from lib.working_memory import is_session_stale
+        plan_path = self.working_dir / TASK_PLAN_FILE
+        plan_path.write_text("# Plan\n")
+        # Backdate file mtime to 3 days ago
+        import time as _time
+        old_time = _time.time() - (72 * 3600)  # 72 hours ago
+        os.utime(plan_path, (old_time, old_time))
+        self.assertTrue(is_session_stale(self.working_dir, timeout_hours=48.0))
+
+    def test_custom_timeout(self):
+        from lib.working_memory import is_session_stale
+        plan_path = self.working_dir / TASK_PLAN_FILE
+        plan_path.write_text("# Plan\n")
+        # Backdate by 2 hours
+        import time as _time
+        old_time = _time.time() - (2 * 3600)
+        os.utime(plan_path, (old_time, old_time))
+        # With 1 hour timeout, should be stale
+        self.assertTrue(is_session_stale(self.working_dir, timeout_hours=1.0))
+        # With 24 hour timeout, should not be stale
+        self.assertFalse(is_session_stale(self.working_dir, timeout_hours=24.0))
+
+
+# ===========================================================================
+# Test: SessionStatus stale fields
+# ===========================================================================
+
+class TestSessionStatusStaleFields(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.working_dir = Path(self.tmpdir) / "working"
+        self.working_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir)
+
+    def test_fresh_session_not_stale(self):
+        (self.working_dir / TASK_PLAN_FILE).write_text(
+            "# Task Plan\n**Task**: test\n## Phases\n### Phase 1: Test\n"
+        )
+        status = get_session_status(self.working_dir)
+        self.assertFalse(status.is_stale)
+        self.assertGreater(status.age_hours, -1)
+
+    def test_status_has_age_hours(self):
+        (self.working_dir / TASK_PLAN_FILE).write_text(
+            "# Task Plan\n**Task**: test\n## Phases\n### Phase 1: Test\n"
+        )
+        status = get_session_status(self.working_dir)
+        self.assertIsInstance(status.age_hours, float)
+
+    def test_inactive_session_default_stale(self):
+        status = get_session_status(self.working_dir)
+        self.assertFalse(status.is_stale)
+        self.assertEqual(status.age_hours, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

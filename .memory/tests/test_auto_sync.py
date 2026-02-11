@@ -889,5 +889,47 @@ class TestCheckStartupDecomposition(unittest.TestCase):
         self.assertFalse(report.active_session)
 
 
+# ---------------------------------------------------------------------------
+# TestStaleSessionHint — C1: stale session detection in startup
+# ---------------------------------------------------------------------------
+
+class TestStaleSessionHint(unittest.TestCase):
+
+    def test_stale_session_hint(self):
+        """Stale session should show 'stale session' in hint."""
+        report = StartupReport(
+            active_session=True,
+            active_session_task="Old task description",
+            active_session_phases="1/3 done",
+            session_stale=True,
+            session_age_hours=96.0,
+            total_entries=5,
+        )
+        hint = _format_hint(report)
+        self.assertIn("stale session", hint)
+        self.assertIn("4d old", hint)  # 96h / 24 = 4d
+        self.assertIn("--clear", hint)
+
+    def test_active_session_not_stale_hint(self):
+        """Non-stale active session should show normal hint."""
+        report = StartupReport(
+            active_session=True,
+            active_session_task="Active task",
+            active_session_phases="2/3 done",
+            session_stale=False,
+            session_age_hours=2.0,
+            total_entries=5,
+        )
+        hint = _format_hint(report)
+        self.assertIn("active session", hint)
+        self.assertNotIn("stale", hint)
+
+    def test_startup_report_stale_fields_default(self):
+        """StartupReport should have session_stale=False by default."""
+        report = StartupReport()
+        self.assertFalse(report.session_stale)
+        self.assertEqual(report.session_age_hours, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

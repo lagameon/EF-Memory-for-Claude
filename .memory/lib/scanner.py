@@ -73,6 +73,8 @@ _EXTENSION_SCORES: Dict[str, float] = {
 }
 
 _SAMPLE_LINES = 50  # Lines to sample for keyword scoring
+_MAX_FILE_SIZE_BYTES = 5_242_880  # 5 MB default
+_MAX_LINE_COUNT = 100_000
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +101,7 @@ class ScanReport:
     documents: List[DocumentInfo] = field(default_factory=list)
     total_scanned: int = 0
     total_excluded: int = 0
+    skipped_oversized: int = 0
     duration_ms: float = 0.0
 
 
@@ -212,9 +215,13 @@ def discover_documents(
 
     # Score and build DocumentInfo for each file
     docs: List[DocumentInfo] = []
+    skipped_oversized = 0
     for rel, abs_path in filtered.items():
         try:
             info = _build_document_info(abs_path, rel, config, import_map)
+            if info is None:
+                skipped_oversized += 1
+                continue
             docs.append(info)
         except (OSError, UnicodeDecodeError):
             continue
@@ -224,6 +231,7 @@ def discover_documents(
 
     # Apply max_documents limit
     report.documents = docs[:max_docs]
+    report.skipped_oversized = skipped_oversized
     report.duration_ms = (time.monotonic() - start_time) * 1000
 
     return report
@@ -234,10 +242,16 @@ def _build_document_info(
     rel_path: str,
     config: dict,
     import_map: Dict[str, int],
-) -> DocumentInfo:
-    """Build a DocumentInfo for a single file."""
+) -> Optional[DocumentInfo]:
+    """Build a DocumentInfo for a single file. Returns None if oversized."""
     stat = abs_path.stat()
     size = stat.st_size
+
+    # File size safety check
+    max_size = config.get("scan", {}).get("max_file_size_bytes", _MAX_FILE_SIZE_BYTES)
+    if size > max_size:
+        logger.info("Skipping oversized file %s (%d bytes > %d limit)", rel_path, size, max_size)
+        return None
 
     # Read content sample
     content_sample = ""
@@ -249,6 +263,8 @@ def _build_document_info(
                 line_count += 1
                 if i < _SAMPLE_LINES:
                     lines.append(line)
+                if line_count >= _MAX_LINE_COUNT:
+                    break
             content_sample = "".join(lines)
     except OSError:
         pass

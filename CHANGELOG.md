@@ -4,6 +4,48 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-11 — V3.2 Phase 3: Intelligence Upgrades, Session Safety, Test Coverage
+
+### 9 improvements across search intelligence, scanner safety, session health, DRY refactoring, and test coverage
+
+**SMART: Confidence-aware search ranking**
+Search scoring now incorporates `_meta.confidence` from entry metadata. A configurable `confidence_weight` (default 0.1) multiplied by the entry's confidence value is added to all 4 search modes (hybrid, vector, keyword, basic). Entries with higher confidence scores rank slightly higher. New `_compute_confidence_boost()` function and `SearchResult.confidence_boost` field for transparency.
+
+**SAFETY: Scanner file size limits**
+`_build_document_info()` now checks file size before reading. Files exceeding `scan.max_file_size_bytes` (default 5MB) are skipped with a log message. Line count safety cap at 100,000 prevents OOM on extremely long single-line files. `ScanReport.skipped_oversized` tracks count.
+
+**SMART: Orphan session detection**
+New `is_session_stale()` function in `working_memory.py` detects abandoned sessions by checking mtime of session files against `v3.session_timeout_hours` (default 48h). `SessionStatus` extended with `is_stale` and `age_hours` fields. Startup hint now warns about stale sessions with age display.
+
+**DRY: init.py `_read_raw_json()` helper**
+Repeated `json.loads(path.read_text())` + try/except pattern in `_handle_hooks_json()` and `_handle_settings_json()` extracted to `_read_raw_json()` helper. Returns `Optional[dict]`, handles missing/corrupt files uniformly.
+
+**TEST: Search internals coverage (+22 tests)**
+Direct tests for `_search_hybrid()`, `_search_vector()`, `_search_keyword()`, `_get_search_weights()`, and confidence boost behavior across all search modes.
+
+**TEST: prompts.py zero → full coverage (+21 tests)**
+New `test_prompts.py` covering `_truncate()`, `entries_to_compact_text()`, all 4 prompt builders (correlation, contradiction, synthesis, risk), single-entry prompt, and default constants.
+
+**TEST: Scanner helpers + file size limits (+9 tests)**
+`_extract_snippet()` direct tests (heading+content, no heading, empty, truncation) and file size limit behavior (oversized skip, normal pass, discover count, default constant).
+
+**TEST: Working memory session completeness + stale detection (+11 tests)**
+`is_session_complete()` (4 tests), `is_session_stale()` (4 tests), and `SessionStatus` stale field behavior (3 tests).
+
+**TEST: Auto-sync stale hints + init DRY helper (+7 tests)**
+Stale session hint formatting (3 tests) and `_read_raw_json()` helper (4 tests).
+
+**Modified files (5):**
+- `.memory/lib/search.py` — confidence_weight, _compute_confidence_boost, SearchResult.confidence_boost
+- `.memory/lib/scanner.py` — _MAX_FILE_SIZE_BYTES, _MAX_LINE_COUNT, ScanReport.skipped_oversized
+- `.memory/lib/working_memory.py` — is_session_stale(), SessionStatus.is_stale/age_hours
+- `.memory/lib/auto_sync.py` — StartupReport.session_stale/session_age_hours, stale hint
+- `.memory/lib/init.py` — _read_raw_json() DRY helper
+
+**Test count: 871 → 938** (+67 tests: 22 search + 21 prompts + 9 scanner + 11 working_memory + 3 auto_sync + 4 init — new file: test_prompts.py)
+
+---
+
 ## 2026-02-11 — V3.2 Phase 2: Security Hardening, Test Coverage, Robustness
 
 ### 11 improvements across I/O performance, self-heal, error handling, test coverage, and startup architecture

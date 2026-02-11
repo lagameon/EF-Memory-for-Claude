@@ -50,6 +50,7 @@ class SearchResult:
     bm25_score: float = 0.0   # BM25 score (0 if unavailable)
     vector_score: float = 0.0 # Vector similarity (0 if unavailable)
     boost: float = 0.0        # Classification + severity boost
+    confidence_boost: float = 0.0  # Confidence-based boost
     search_mode: str = ""     # "hybrid" | "vector" | "keyword" | "basic"
 
 
@@ -80,6 +81,7 @@ def _get_search_weights(config: dict) -> dict:
         "hard_s2_boost": embedding_search.get("hard_s2_boost", 0.10),
         "hard_s3_boost": embedding_search.get("hard_s3_boost", 0.05),
         "min_score": embedding_search.get("min_score", 0.1),
+        "confidence_weight": embedding_search.get("confidence_weight", 0.1),
     }
 
 
@@ -97,6 +99,12 @@ def _compute_boost(entry: dict, weights: dict) -> float:
         "S3": weights["hard_s3_boost"],
     }
     return boost_map.get(severity, 0.0)
+
+
+def _compute_confidence_boost(entry: dict, weights: dict) -> float:
+    """Compute confidence-based boost from entry metadata."""
+    confidence = entry.get("_meta", {}).get("confidence", 0.5)
+    return weights.get("confidence_weight", 0.1) * confidence
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +180,13 @@ def _search_hybrid(
         bm25_s = bm25_map.get(eid, 0.0)
         vec_s = vec_map.get(eid, 0.0)
         boost = _compute_boost(entry, weights)
+        conf_boost = _compute_confidence_boost(entry, weights)
 
         score = (
             weights["bm25_weight"] * bm25_s
             + weights["vector_weight"] * vec_s
             + boost
+            + conf_boost
         )
 
         results.append(SearchResult(
@@ -186,6 +196,7 @@ def _search_hybrid(
             bm25_score=bm25_s,
             vector_score=vec_s,
             boost=boost,
+            confidence_boost=conf_boost,
             search_mode="hybrid",
         ))
 
@@ -223,7 +234,8 @@ def _search_vector(
         entry = entries[eid]
         vec_s = (sim + 1.0) / 2.0  # Normalize to [0, 1]
         boost = _compute_boost(entry, weights)
-        score = vec_s + boost
+        conf_boost = _compute_confidence_boost(entry, weights)
+        score = vec_s + boost + conf_boost
 
         results.append(SearchResult(
             entry_id=eid,
@@ -231,6 +243,7 @@ def _search_vector(
             score=score,
             vector_score=vec_s,
             boost=boost,
+            confidence_boost=conf_boost,
             search_mode="vector",
         ))
 
@@ -259,7 +272,8 @@ def _search_keyword(
 
         entry = entries[eid]
         boost = _compute_boost(entry, weights)
-        score = bm25_s + boost
+        conf_boost = _compute_confidence_boost(entry, weights)
+        score = bm25_s + boost + conf_boost
 
         results.append(SearchResult(
             entry_id=eid,
@@ -267,6 +281,7 @@ def _search_keyword(
             score=score,
             bm25_score=bm25_s,
             boost=boost,
+            confidence_boost=conf_boost,
             search_mode="keyword",
         ))
 
@@ -335,13 +350,15 @@ def _search_basic(
                 title_bonus += 0.1
 
         boost = _compute_boost(entry, weights)
-        score = overlap_ratio + title_bonus + boost
+        conf_boost = _compute_confidence_boost(entry, weights)
+        score = overlap_ratio + title_bonus + boost + conf_boost
 
         results.append(SearchResult(
             entry_id=eid,
             entry=entry,
             score=score,
             boost=boost,
+            confidence_boost=conf_boost,
             search_mode="basic",
         ))
 

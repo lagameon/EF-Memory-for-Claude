@@ -581,5 +581,101 @@ class TestScanReport(unittest.TestCase):
         self.assertEqual(report.duration_ms, 0.0)
 
 
+# ===========================================================================
+# Test: _extract_snippet
+# ===========================================================================
+
+class TestExtractSnippet(unittest.TestCase):
+
+    def test_heading_and_content(self):
+        from lib.scanner import _extract_snippet
+        content = "# My Title\nSome content here\nMore content"
+        result = _extract_snippet(content)
+        self.assertIn("My Title", result)
+        self.assertIn("Some content", result)
+
+    def test_no_heading(self):
+        from lib.scanner import _extract_snippet
+        content = "Just plain text\nMore text"
+        result = _extract_snippet(content)
+        self.assertIn("Just plain text", result)
+
+    def test_empty_content(self):
+        from lib.scanner import _extract_snippet
+        result = _extract_snippet("")
+        self.assertEqual(result, "")
+
+    def test_long_line_truncated(self):
+        from lib.scanner import _extract_snippet
+        content = "# Title\n" + "x" * 200
+        result = _extract_snippet(content)
+        # first_line should be truncated to 120 chars
+        parts = result.split(" | ")
+        if len(parts) > 1:
+            self.assertLessEqual(len(parts[1]), 120)
+
+
+# ===========================================================================
+# Test: File size limits (B1)
+# ===========================================================================
+
+class TestFileSizeLimits(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_oversized_file_skipped(self):
+        """Files larger than max_file_size_bytes should return None."""
+        from lib.scanner import _build_document_info
+        # Create a file larger than limit
+        large_file = self.tmpdir / "large.md"
+        large_file.write_text("x" * 100)  # 100 bytes
+
+        config = {"scan": {"max_file_size_bytes": 50}}  # 50 byte limit
+        result = _build_document_info(large_file, "large.md", config, {})
+        self.assertIsNone(result)
+
+    def test_normal_file_not_skipped(self):
+        """Files under the limit should return DocumentInfo."""
+        from lib.scanner import _build_document_info
+        normal_file = self.tmpdir / "normal.md"
+        normal_file.write_text("# Hello\nShort file")
+
+        config = {"scan": {"max_file_size_bytes": 5_242_880}}
+        result = _build_document_info(normal_file, "normal.md", config, {})
+        self.assertIsNotNone(result)
+
+    def test_discover_counts_oversized(self):
+        """discover_documents should count skipped oversized files."""
+        _create_project(self.tmpdir, {
+            "docs/small.md": "# Small\nContent",
+            "docs/large.md": "x" * 200,
+        })
+        config = _make_config()
+        config["scan"]["max_file_size_bytes"] = 100
+        report = discover_documents(self.tmpdir, config)
+        self.assertGreaterEqual(report.skipped_oversized, 1)
+
+    def test_default_size_limit(self):
+        """Default size limit should be 5MB."""
+        from lib.scanner import _MAX_FILE_SIZE_BYTES
+        self.assertEqual(_MAX_FILE_SIZE_BYTES, 5_242_880)
+
+
+# ===========================================================================
+# Test: ScanReport skipped_oversized field
+# ===========================================================================
+
+class TestScanReportOversized(unittest.TestCase):
+
+    def test_default_zero(self):
+        report = ScanReport()
+        self.assertEqual(report.skipped_oversized, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

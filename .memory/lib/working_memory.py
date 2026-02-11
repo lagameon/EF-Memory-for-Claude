@@ -102,6 +102,8 @@ class SessionStatus:
     progress_lines: int = 0
     created_at: str = ""
     last_modified: str = ""
+    is_stale: bool = False
+    age_hours: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +423,11 @@ def get_session_status(working_dir: Path) -> SessionStatus:
         "%Y-%m-%dT%H:%M:%SZ"
     )
 
+    # Stale detection
+    import time as _time
+    age_seconds = _time.time() - stat.st_mtime
+    age_hours = age_seconds / 3600.0
+
     return SessionStatus(
         active=True,
         task_description=task_desc,
@@ -430,6 +437,8 @@ def get_session_status(working_dir: Path) -> SessionStatus:
         progress_lines=progress_lines,
         created_at=created_at,
         last_modified=last_modified,
+        is_stale=age_hours > 48.0,
+        age_hours=round(age_hours, 1),
     )
 
 
@@ -449,6 +458,39 @@ def is_session_complete(working_dir: Path) -> bool:
         return False
     total, done = _count_phases(plan_text)
     return total > 0 and done == total
+
+
+def is_session_stale(working_dir: Path, timeout_hours: float = 48.0) -> bool:
+    """Check if a working memory session is stale (abandoned).
+
+    A session is considered stale if the most recently modified
+    session file hasn't been touched for longer than *timeout_hours*.
+
+    Returns False if no session exists.
+    """
+    plan_path = working_dir / TASK_PLAN_FILE
+    if not plan_path.exists():
+        return False
+
+    # Check most recent mtime across all session files
+    latest_mtime = 0.0
+    for filename in (TASK_PLAN_FILE, FINDINGS_FILE, PROGRESS_FILE):
+        filepath = working_dir / filename
+        if filepath.exists():
+            try:
+                mtime = filepath.stat().st_mtime
+                if mtime > latest_mtime:
+                    latest_mtime = mtime
+            except OSError:
+                continue
+
+    if latest_mtime == 0.0:
+        return False
+
+    import time as _time
+    age_seconds = _time.time() - latest_mtime
+    age_hours = age_seconds / 3600.0
+    return age_hours > timeout_hours
 
 
 def harvest_session(

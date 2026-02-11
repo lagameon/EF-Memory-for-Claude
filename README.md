@@ -86,12 +86,12 @@ This system solves that by enforcing:
 
 | Level | Mode | Requirements | Score Formula |
 |-------|------|-------------|---------------|
-| 1 | Hybrid | Embedder + FTS5 | `bm25×0.4 + vector×0.6 + boost` |
-| 2 | Vector | Embedder only | `vector×1.0 + boost` |
-| 3 | Keyword | FTS5 only | `bm25×1.0 + boost` |
-| 4 | Basic | None (zero deps) | token overlap on JSONL |
+| 1 | Hybrid | Embedder + FTS5 | `bm25×0.4 + vector×0.6 + boost + confidence` |
+| 2 | Vector | Embedder only | `vector×1.0 + boost + confidence` |
+| 3 | Keyword | FTS5 only | `bm25×1.0 + boost + confidence` |
+| 4 | Basic | None (zero deps) | token overlap + confidence on JSONL |
 
-Hard+S1 entries get a +0.15 re-rank boost; the system always returns results regardless of available infrastructure.
+Hard+S1 entries get a +0.15 re-rank boost; entries with higher `_meta.confidence` get an additional configurable boost (default weight 0.1). The system always returns results regardless of available infrastructure.
 
 ---
 
@@ -829,7 +829,7 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── init_cli.py        #   V3: project init CLI
 │   ├── working_memory_cli.py  #  V3: working memory CLI
 │   └── compact_cli.py     #   V3: compaction CLI (--stats, --dry-run)
-└── tests/                 # 871 unit tests
+└── tests/                 # 938 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -850,7 +850,8 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
     ├── test_transcript_scanner.py # V3: conversation scan → drafts tests
     ├── test_compaction.py  #   V3: compaction + archive tests
     ├── test_events_io.py   #   V3: events I/O + incremental sync tests
-    └── test_pre_edit_search.py # V3: pre-edit memory search hook tests
+    ├── test_pre_edit_search.py # V3: pre-edit memory search hook tests
+    └── test_prompts.py     #   LLM prompt template tests
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
@@ -972,4 +973,4 @@ MIT — see [LICENSE](LICENSE).
 | Config | 1.5 |
 | EFM Version | 3.2.0 |
 | Commands | 1.3 (10 slash commands) |
-| V3 Engine | M11 (871 tests) |
+| V3 Engine | M11 (938 tests) |

@@ -1000,5 +1000,41 @@ class TestAtomicWriteJson(unittest.TestCase):
             self.assertTrue(loaded["preserved"])
 
 
+# ===========================================================================
+# Test: _read_raw_json (C2)
+# ===========================================================================
+
+class TestReadRawJson(unittest.TestCase):
+
+    def test_reads_valid_json(self):
+        from lib.init import _read_raw_json
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test.json"
+            path.write_text('{"key": "value"}\n')
+            result = _read_raw_json(path)
+            self.assertEqual(result["key"], "value")
+
+    def test_missing_file_returns_none(self):
+        from lib.init import _read_raw_json
+        result = _read_raw_json(Path("/nonexistent/file.json"))
+        self.assertIsNone(result)
+
+    def test_corrupt_json_returns_none(self):
+        from lib.init import _read_raw_json
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad.json"
+            path.write_text("not valid json{{{")
+            result = _read_raw_json(path)
+            self.assertIsNone(result)
+
+    def test_empty_file_returns_none(self):
+        from lib.init import _read_raw_json
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "empty.json"
+            path.write_text("")
+            result = _read_raw_json(path)
+            self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

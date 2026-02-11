@@ -18,6 +18,7 @@ from lib.search import (
     _get_search_weights,
     _load_entries,
     _determine_mode,
+    SearchResult,
 )
 from lib.vectordb import VectorDB
 from lib.sync import sync_embeddings
@@ -630,6 +631,256 @@ class TestSearchReportReasoningAnnotations(unittest.TestCase):
         # The key guarantee: no high/medium annotations for fresh entries
         for ann in annotations:
             self.assertNotIn(ann.get("risk_level"), ("high", "medium"))
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Direct tests for internal search functions
+# ---------------------------------------------------------------------------
+
+class TestSearchHybridDirect(SearchTestBase):
+    """Direct tests for _search_hybrid internal function."""
+
+    def test_hybrid_returns_search_results(self):
+        from lib.search import _search_hybrid
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_hybrid(
+            "leakage rolling", self.db, self.embedder,
+            entries, weights, None, 5,
+        )
+        self.assertIsInstance(results, list)
+        self.assertGreater(len(results), 0)
+        self.assertIsInstance(results[0], SearchResult)
+
+    def test_hybrid_score_components(self):
+        from lib.search import _search_hybrid
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_hybrid(
+            "leakage", self.db, self.embedder,
+            entries, weights, None, 5,
+        )
+        for r in results:
+            self.assertGreaterEqual(r.bm25_score, 0.0)
+            self.assertGreaterEqual(r.vector_score, 0.0)
+            self.assertGreaterEqual(r.boost, 0.0)
+            self.assertEqual(r.search_mode, "hybrid")
+
+    def test_hybrid_respects_max_results(self):
+        from lib.search import _search_hybrid
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_hybrid(
+            "leakage", self.db, self.embedder,
+            entries, weights, None, 1,
+        )
+        self.assertLessEqual(len(results), 1)
+
+    def test_hybrid_skips_missing_entries(self):
+        """Entries in vectordb but not in entries dict should be skipped."""
+        from lib.search import _search_hybrid
+        entries = {}  # Empty entries dict
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_hybrid(
+            "leakage", self.db, self.embedder,
+            entries, weights, None, 5,
+        )
+        self.assertEqual(len(results), 0)
+
+
+class TestSearchVectorDirect(SearchTestBase):
+    """Direct tests for _search_vector internal function."""
+
+    def test_vector_returns_results(self):
+        from lib.search import _search_vector
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_vector(
+            "leakage rolling", self.db, self.embedder,
+            entries, weights, None, 5,
+        )
+        self.assertIsInstance(results, list)
+        for r in results:
+            self.assertEqual(r.search_mode, "vector")
+            self.assertEqual(r.bm25_score, 0.0)
+
+    def test_vector_respects_max_results(self):
+        from lib.search import _search_vector
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_vector(
+            "leakage", self.db, self.embedder,
+            entries, weights, None, 1,
+        )
+        self.assertLessEqual(len(results), 1)
+
+    def test_vector_sorted_by_score(self):
+        from lib.search import _search_vector
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_vector(
+            "leakage rolling shift", self.db, self.embedder,
+            entries, weights, None, 5,
+        )
+        scores = [r.score for r in results]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+
+class TestSearchKeywordDirect(SearchTestBase):
+    """Direct tests for _search_keyword internal function."""
+
+    def test_keyword_returns_results(self):
+        from lib.search import _search_keyword
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_keyword(
+            "rolling shift leakage", self.db,
+            entries, weights, 5,
+        )
+        self.assertIsInstance(results, list)
+        for r in results:
+            self.assertEqual(r.search_mode, "keyword")
+            self.assertEqual(r.vector_score, 0.0)
+
+    def test_keyword_no_match(self):
+        from lib.search import _search_keyword
+        entries = _load_entries(self.events_path)
+        weights = _get_search_weights(TEST_CONFIG)
+        results = _search_keyword(
+            "zzz_nonexistent_zzz", self.db,
+            entries, weights, 5,
+        )
+        self.assertEqual(len(results), 0)
+
+
+class TestGetSearchWeightsDirect(unittest.TestCase):
+    """Direct tests for _get_search_weights."""
+
+    def test_default_weights(self):
+        weights = _get_search_weights({})
+        self.assertEqual(weights["bm25_weight"], 0.4)
+        self.assertEqual(weights["vector_weight"], 0.6)
+        self.assertEqual(weights["min_score"], 0.1)
+        self.assertEqual(weights["confidence_weight"], 0.1)
+
+    def test_custom_weights(self):
+        config = {"embedding": {"search": {
+            "bm25_weight": 0.5,
+            "vector_weight": 0.5,
+            "confidence_weight": 0.2,
+        }}}
+        weights = _get_search_weights(config)
+        self.assertEqual(weights["bm25_weight"], 0.5)
+        self.assertEqual(weights["vector_weight"], 0.5)
+        self.assertEqual(weights["confidence_weight"], 0.2)
+
+    def test_partial_config(self):
+        config = {"embedding": {"search": {"bm25_weight": 0.3}}}
+        weights = _get_search_weights(config)
+        self.assertEqual(weights["bm25_weight"], 0.3)
+        self.assertEqual(weights["vector_weight"], 0.6)  # default
+
+    def test_all_keys_present(self):
+        weights = _get_search_weights({})
+        expected_keys = {
+            "bm25_weight", "vector_weight", "hard_s1_boost",
+            "hard_s2_boost", "hard_s3_boost", "min_score",
+            "confidence_weight",
+        }
+        self.assertEqual(set(weights.keys()), expected_keys)
+
+
+class TestConfidenceBoostSearch(SearchTestBase):
+    """Tests for confidence-aware search ranking."""
+
+    def test_confidence_boost_field_present(self):
+        """SearchResult should have confidence_boost field."""
+        report = search_memory(
+            query="leakage",
+            events_path=self.events_path,
+            vectordb=self.db,
+            embedder=self.embedder,
+            config=TEST_CONFIG,
+        )
+        for r in report.results:
+            self.assertTrue(hasattr(r, "confidence_boost"))
+            self.assertIsInstance(r.confidence_boost, float)
+
+    def test_high_confidence_ranks_higher(self):
+        """Entries with higher _meta.confidence should rank higher, all else equal."""
+        # Create two entries with identical content but different confidence
+        high_conf = {
+            "id": "test-high-conf-11111111",
+            "type": "lesson", "classification": "soft", "severity": None,
+            "title": "Unique confidence test alpha bravo",
+            "content": ["Point about confidence testing alpha bravo"],
+            "rule": None, "source": ["test.py"], "tags": ["conftest"],
+            "created_at": "2026-02-01T00:00:00Z", "deprecated": False,
+            "_meta": {"confidence": 0.95},
+        }
+        low_conf = {
+            "id": "test-low-conf-22222222",
+            "type": "lesson", "classification": "soft", "severity": None,
+            "title": "Unique confidence test alpha bravo",
+            "content": ["Point about confidence testing alpha bravo"],
+            "rule": None, "source": ["test.py"], "tags": ["conftest"],
+            "created_at": "2026-02-01T00:00:00Z", "deprecated": False,
+            "_meta": {"confidence": 0.1},
+        }
+        # Write them
+        with open(self.events_path, "a") as f:
+            f.write(json.dumps(high_conf) + "\n")
+            f.write(json.dumps(low_conf) + "\n")
+
+        report = search_memory(
+            query="confidence test alpha bravo",
+            events_path=self.events_path,
+            vectordb=None, embedder=None,
+            config=TEST_CONFIG,
+            force_mode="basic",
+        )
+        conf_results = [r for r in report.results if "conf" in r.entry_id]
+        if len(conf_results) >= 2:
+            # High confidence should come first
+            self.assertEqual(conf_results[0].entry_id, "test-high-conf-11111111")
+
+    def test_default_confidence_used(self):
+        """Entries without _meta.confidence should use default 0.5."""
+        from lib.search import _compute_confidence_boost
+        entry = {"title": "test", "tags": []}  # No _meta
+        weights = _get_search_weights(TEST_CONFIG)
+        boost = _compute_confidence_boost(entry, weights)
+        expected = 0.1 * 0.5  # confidence_weight * default_confidence
+        self.assertAlmostEqual(boost, expected, places=3)
+
+    def test_confidence_boost_varies_with_confidence(self):
+        from lib.search import _compute_confidence_boost
+        weights = _get_search_weights(TEST_CONFIG)
+        entry_high = {"_meta": {"confidence": 1.0}}
+        entry_low = {"_meta": {"confidence": 0.0}}
+        boost_high = _compute_confidence_boost(entry_high, weights)
+        boost_low = _compute_confidence_boost(entry_low, weights)
+        self.assertGreater(boost_high, boost_low)
+
+    def test_confidence_weight_configurable(self):
+        from lib.search import _compute_confidence_boost
+        config = {"embedding": {"search": {"confidence_weight": 0.5}}}
+        weights = _get_search_weights(config)
+        entry = {"_meta": {"confidence": 1.0}}
+        boost = _compute_confidence_boost(entry, weights)
+        self.assertAlmostEqual(boost, 0.5, places=3)
+
+    def test_basic_search_includes_confidence(self):
+        """Basic search should apply confidence boost."""
+        report = search_memory(
+            query="leakage rolling",
+            events_path=self.events_path,
+            vectordb=None, embedder=None,
+            config=TEST_CONFIG,
+            force_mode="basic",
+        )
+        for r in report.results:
+            self.assertGreaterEqual(r.confidence_boost, 0.0)
 
 
 if __name__ == "__main__":

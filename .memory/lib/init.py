@@ -443,6 +443,16 @@ def _atomic_write_json(path: Path, data: dict) -> None:
         raise
 
 
+def _read_raw_json(path: Path) -> Optional[dict]:
+    """Read a JSON file, returning None on missing/corrupt files."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Version stamping
 # ---------------------------------------------------------------------------
@@ -618,13 +628,9 @@ def _handle_hooks_json(
     hooks_path = claude_dir / "hooks.json"
     rel_path = ".claude/hooks.json"
 
-    existing_hooks = None
-    if hooks_path.exists():
-        try:
-            existing_hooks = json.loads(hooks_path.read_text())
-        except (json.JSONDecodeError, OSError) as exc:
-            report.warnings.append(f"Could not parse existing hooks.json: {exc}")
-            existing_hooks = None
+    existing_hooks = _read_raw_json(hooks_path)
+    if existing_hooks is None and hooks_path.exists():
+        report.warnings.append(f"Could not parse existing hooks.json")
 
     merged = generate_hooks_json(existing_hooks)
 
@@ -654,13 +660,9 @@ def _handle_settings_json(
     settings_path = claude_dir / "settings.local.json"
     rel_path = ".claude/settings.local.json"
 
-    existing = None
-    if settings_path.exists():
-        try:
-            existing = json.loads(settings_path.read_text())
-        except (json.JSONDecodeError, OSError) as exc:
-            report.warnings.append(f"Could not parse existing settings.local.json: {exc}")
-            existing = None
+    existing = _read_raw_json(settings_path)
+    if existing is None and settings_path.exists():
+        report.warnings.append(f"Could not parse existing settings.local.json")
 
     merged = merge_settings_json(existing)
 

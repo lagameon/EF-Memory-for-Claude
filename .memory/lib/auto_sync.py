@@ -76,6 +76,8 @@ class StartupReport:
     active_session: bool = False
     active_session_task: str = ""
     active_session_phases: str = ""       # e.g., "1/3 done"
+    session_stale: bool = False
+    session_age_hours: float = 0.0
     staleness_threshold_days: int = 90    # Used in hint formatting
     compaction_suggested: bool = False
     waste_ratio: float = 0.0
@@ -579,6 +581,8 @@ def _check_session_recovery(report: StartupReport, project_root: Path, config: d
                 report.active_session_phases = (
                     f"{wm_status.phases_done}/{wm_status.phases_total} done"
                 )
+                report.session_stale = wm_status.is_stale
+                report.session_age_hours = wm_status.age_hours
         except Exception as e:
             logger.warning("Session recovery check failed: %s", e)
 
@@ -630,7 +634,11 @@ def _format_hint(report: StartupReport, memory_dir: Optional[Path] = None) -> st
 
     if report.active_session:
         task_preview = report.active_session_task[:50]
-        parts.append(f"active session: \"{task_preview}\" ({report.active_session_phases})")
+        if report.session_stale:
+            age_days = int(report.session_age_hours / 24)
+            parts.append(f"stale session ({age_days}d old): \"{task_preview}\" — consider /memory-plan --clear")
+        else:
+            parts.append(f"active session: \"{task_preview}\" ({report.active_session_phases})")
 
     if report.drafts_expired > 0 and report.pending_drafts > 0:
         parts.append(
