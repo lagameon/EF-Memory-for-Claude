@@ -10,8 +10,11 @@ Fast path: skips if file is in .memory/, .claude/, or non-code files.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("efm.pre_edit_search")
 
 # Resolve paths
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -21,9 +24,15 @@ _PROJECT_ROOT = _MEMORY_DIR.parent
 sys.path.insert(0, str(_MEMORY_DIR))
 
 
+MAX_STDIN_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
 def main():
     try:
-        input_data = json.loads(sys.stdin.read())
+        raw_input = sys.stdin.read(MAX_STDIN_SIZE + 1)
+        if len(raw_input) > MAX_STDIN_SIZE:
+            sys.exit(0)
+        input_data = json.loads(raw_input)
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
@@ -81,7 +90,8 @@ def main():
     try:
         from lib.config_presets import load_config
         config = load_config(config_path)
-    except Exception:
+    except Exception as e:
+        logger.warning("Config load failed, using defaults: %s", e)
         config = {}
 
     # Check if hook is disabled via config
@@ -109,9 +119,8 @@ def main():
                 lines.append(line)
 
             print(json.dumps({"additionalContext": "\n".join(lines)}))
-    except Exception:
-        # Never block edits due to search failures
-        pass
+    except Exception as e:
+        logger.debug("Memory search skipped: %s", e)
 
     sys.exit(0)
 

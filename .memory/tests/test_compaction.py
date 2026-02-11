@@ -480,5 +480,58 @@ class TestEvolutionCheckpointReset(unittest.TestCase):
             self.assertEqual(report.entries_kept, 1)  # Compaction still succeeds
 
 
+# ---------------------------------------------------------------------------
+# Tests: corrupted JSON audit logging (C5)
+# ---------------------------------------------------------------------------
+
+class TestCorruptedJsonLogging(unittest.TestCase):
+
+    def test_compaction_logs_corrupted_json(self):
+        """events.jsonl with bad lines logs warning."""
+        import logging
+        with tempfile.TemporaryDirectory() as tmpdir:
+            events_path = Path(tmpdir) / "events.jsonl"
+            archive_dir = Path(tmpdir) / "archive"
+
+            # Write mix of good and bad JSON
+            with open(events_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(_make_entry("a", title="Good entry")) + "\n")
+                f.write("this is not valid json\n")
+                f.write("{broken json line\n")
+                f.write(json.dumps(_make_entry("b", title="Another good")) + "\n")
+
+            with self.assertLogs("efm.compaction", level="WARNING") as cm:
+                report = compact(events_path, archive_dir, {})
+
+            # Should have logged warnings about corrupted lines
+            corrupted_msgs = [m for m in cm.output if "corrupted JSON" in m]
+            self.assertGreaterEqual(len(corrupted_msgs), 2)
+            # Should also have the summary warning
+            total_msgs = [m for m in cm.output if "corrupted line(s) skipped total" in m]
+            self.assertEqual(len(total_msgs), 1)
+
+    def test_compaction_succeeds_with_mixed_lines(self):
+        """Compaction works with mix of good/bad JSON."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            events_path = Path(tmpdir) / "events.jsonl"
+            archive_dir = Path(tmpdir) / "archive"
+
+            with open(events_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(_make_entry("a", title="Good 1")) + "\n")
+                f.write("corrupted line here\n")
+                f.write(json.dumps(_make_entry("b", title="Good 2", deprecated=True)) + "\n")
+                f.write(json.dumps(_make_entry("c", title="Good 3")) + "\n")
+
+            report = compact(events_path, archive_dir, {})
+
+            # Only good entries should be processed
+            self.assertEqual(report.entries_kept, 2)  # a and c (b is deprecated)
+            self.assertEqual(report.lines_archived, 1)  # b is archived
+            result = _read_events(events_path)
+            self.assertEqual(len(result), 2)
+            ids = {e["id"] for e in result}
+            self.assertEqual(ids, {"a", "c"})
+
+
 if __name__ == "__main__":
     unittest.main()

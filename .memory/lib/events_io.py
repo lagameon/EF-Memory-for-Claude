@@ -66,9 +66,9 @@ def load_events_latest_wins(
                             entries[entry_id] = entry
                     except json.JSONDecodeError as e:
                         logger.debug("Skipping invalid JSON: %s", e)
-                # Count total lines (needed for backward compat)
-                f.seek(0)
-                total_lines = sum(1 for _ in f)
+                # total_lines not computed in byte-offset mode — callers using
+                # byte_offset rely on end_byte_offset for cursors, not total_lines.
+                total_lines = 0
             else:
                 # Standard path: scan from beginning
                 for i, line in enumerate(f):

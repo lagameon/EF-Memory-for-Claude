@@ -829,7 +829,7 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
 │   ├── init_cli.py        #   V3: project init CLI
 │   ├── working_memory_cli.py  #  V3: working memory CLI
 │   └── compact_cli.py     #   V3: compaction CLI (--stats, --dry-run)
-└── tests/                 # 824 unit tests
+└── tests/                 # 871 unit tests
     ├── conftest.py
     ├── test_text_builder.py
     ├── test_vectordb.py
@@ -848,7 +848,9 @@ Additional path keys (e.g., `FEATURE_ROOTS`, `DEPLOYMENT_ROOTS`) can be added fo
     ├── test_working_memory.py  #  V3: working memory + auto-harvest tests
     ├── test_lifecycle.py   #   V3: lifecycle automation tests
     ├── test_transcript_scanner.py # V3: conversation scan → drafts tests
-    └── test_compaction.py  #   V3: compaction + archive tests
+    ├── test_compaction.py  #   V3: compaction + archive tests
+    ├── test_events_io.py   #   V3: events I/O + incremental sync tests
+    └── test_pre_edit_search.py # V3: pre-edit memory search hook tests
 
 .claude/commands/
 ├── memory-save.md         # Entry creation workflow
@@ -970,4 +972,4 @@ MIT — see [LICENSE](LICENSE).
 | Config | 1.5 |
 | EFM Version | 3.2.0 |
 | Commands | 1.3 (10 slash commands) |
-| V3 Engine | M11 (824 tests) |
+| V3 Engine | M11 (871 tests) |

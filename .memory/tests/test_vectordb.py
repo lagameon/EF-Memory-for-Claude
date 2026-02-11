@@ -11,7 +11,7 @@ _MEMORY_DIR = Path(__file__).resolve().parent.parent
 if str(_MEMORY_DIR) not in sys.path:
     sys.path.insert(0, str(_MEMORY_DIR))
 
-from lib.vectordb import VectorDB, cosine_similarity, pack_vector, unpack_vector
+from lib.vectordb import VectorDB, SCHEMA_VERSION, cosine_similarity, pack_vector, unpack_vector
 
 
 class TestCosineSimiarity(unittest.TestCase):
@@ -308,6 +308,92 @@ class TestSearchVectorsDeprecatedIncluded(unittest.TestCase):
         self.assertIn("a", ids)
         self.assertIn("b", ids)
         db.close()
+
+
+class TestSchemaVersioning(unittest.TestCase):
+
+    def test_schema_version_set_on_fresh_db(self):
+        """New DB gets user_version = SCHEMA_VERSION after ensure_schema."""
+        import sqlite3
+        db_path = Path(tempfile.mkdtemp()) / "fresh.db"
+        db = VectorDB(db_path)
+        db.open()
+        db.ensure_schema()
+        version = db._conn.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, SCHEMA_VERSION)
+        db.close()
+
+    def test_schema_version_preserved_on_reopen(self):
+        """Close and reopen preserves the schema version."""
+        import sqlite3
+        db_path = Path(tempfile.mkdtemp()) / "reopen.db"
+        db = VectorDB(db_path)
+        db.open()
+        db.ensure_schema()
+        db.close()
+
+        # Reopen
+        db2 = VectorDB(db_path)
+        db2.open()
+        version = db2._conn.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, SCHEMA_VERSION)
+        db2.close()
+
+    def test_legacy_db_gets_version_stamp(self):
+        """DB with user_version=0 (legacy) gets stamped after ensure_schema."""
+        import sqlite3
+        db_path = Path(tempfile.mkdtemp()) / "legacy.db"
+        # Create a DB without schema versioning (simulate legacy)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA user_version = 0")
+        conn.close()
+
+        db = VectorDB(db_path)
+        db.open()
+        db.ensure_schema()
+        version = db._conn.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, SCHEMA_VERSION)
+        db.close()
+
+    def test_newer_schema_warns(self):
+        """DB with higher version logs a warning."""
+        import sqlite3
+        import logging
+        db_path = Path(tempfile.mkdtemp()) / "newer.db"
+        # Create a DB with a higher schema version
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 5}")
+        conn.close()
+
+        db = VectorDB(db_path)
+        db.open()
+        with self.assertLogs("efm.vectordb", level="WARNING") as cm:
+            db.ensure_schema()
+        # Check that the warning message mentions the version mismatch
+        self.assertTrue(any("newer" in msg.lower() or "version" in msg.lower() for msg in cm.output))
+        db.close()
+
+    def test_migration_idempotent(self):
+        """Calling ensure_schema twice is safe and does not error."""
+        db_path = Path(tempfile.mkdtemp()) / "idempotent.db"
+        db = VectorDB(db_path)
+        db.open()
+        db.ensure_schema()
+        db.ensure_schema()  # Second call should be safe
+        version = db._conn.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, SCHEMA_VERSION)
+        # Verify DB still works
+        db.upsert_vector("e1", "h1", "mock", "m", 3, [1.0, 0.0, 0.0])
+        self.assertTrue(db.has_vector("e1"))
+        db.close()
+
+    def test_stats_includes_schema_version(self):
+        """stats() dict has schema_version key."""
+        db_path = Path(tempfile.mkdtemp()) / "stats_ver.db"
+        with VectorDB(db_path) as db:
+            stats = db.stats()
+            self.assertIn("schema_version", stats)
+            self.assertEqual(stats["schema_version"], SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

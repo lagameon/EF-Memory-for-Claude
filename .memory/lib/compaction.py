@@ -105,6 +105,7 @@ def _resolve_latest_wins(raw_lines: List[str]) -> Tuple[
     latest: Dict[str, dict] = {}
     latest_idx: Dict[str, int] = {}
     all_parsed: List[Tuple[int, str, dict]] = []
+    skipped_count = 0
     for i, line in enumerate(raw_lines):
         try:
             entry = json.loads(line)
@@ -113,8 +114,11 @@ def _resolve_latest_wins(raw_lines: List[str]) -> Tuple[
                 latest[entry_id] = entry
                 latest_idx[entry_id] = i
                 all_parsed.append((i, entry_id, entry))
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as e:
+            skipped_count += 1
+            logger.warning("Compaction: skipped corrupted JSON at line %d: %s", i + 1, e)
+    if skipped_count > 0:
+        logger.warning("Compaction: %d corrupted line(s) skipped total", skipped_count)
     return latest, latest_idx, all_parsed
 
 

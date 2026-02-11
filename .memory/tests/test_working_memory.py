@@ -1122,6 +1122,154 @@ class TestIsViableCandidate(unittest.TestCase):
 
 
 # ===========================================================================
+# Test: _compute_extraction_confidence (comprehensive)
+# ===========================================================================
+
+class TestComputeExtractionConfidence(unittest.TestCase):
+    """Comprehensive direct tests for the _compute_extraction_confidence function."""
+
+    def _make_candidate(self, **kwargs):
+        """Create a HarvestCandidate with sensible defaults."""
+        defaults = {
+            "suggested_type": "lesson",
+            "title": "A sufficiently long title for testing purposes",  # >20 chars
+            "content": ["A sufficiently long title for testing purposes", "Extra content line"],
+            "rule": None,
+            "implication": "Something important follows",
+            "source_hint": ".memory/working/findings.md",
+            "extraction_reason": "Explicit LESSON: marker",
+        }
+        defaults.update(kwargs)
+        return HarvestCandidate(**defaults)
+
+    def test_confidence_lesson_marker(self):
+        """extraction_reason containing 'explicit' + 'lesson' -> base 0.9."""
+        candidate = self._make_candidate(
+            extraction_reason="Explicit LESSON: marker",
+            implication="Important lesson",
+        )
+        score = _compute_extraction_confidence(candidate)
+        # base=0.9, title>20 +0.05, no rule -0 (has implication), content has 2 items
+        # no rule but has implication -> no -0.15 penalty
+        self.assertGreaterEqual(score, 0.85)
+
+    def test_confidence_decision_marker(self):
+        """extraction_reason containing 'explicit' + 'decision' -> base 0.9."""
+        candidate = self._make_candidate(
+            suggested_type="decision",
+            extraction_reason="Explicit DECISION: marker",
+            implication="Chose this approach",
+        )
+        score = _compute_extraction_confidence(candidate)
+        self.assertGreaterEqual(score, 0.85)
+
+    def test_confidence_must_keyword(self):
+        """extraction_reason containing 'must' -> base 0.8."""
+        candidate = self._make_candidate(
+            suggested_type="constraint",
+            extraction_reason="MUST/NEVER/ALWAYS statement",
+            rule="MUST validate all inputs",
+            implication=None,
+        )
+        score = _compute_extraction_confidence(candidate)
+        # base=0.8, title>20 +0.05, has rule +0.05 = 0.9
+        self.assertAlmostEqual(score, 0.9, places=2)
+
+    def test_confidence_never_keyword(self):
+        """extraction_reason containing 'never' -> base 0.8."""
+        candidate = self._make_candidate(
+            suggested_type="constraint",
+            extraction_reason="MUST/NEVER/ALWAYS statement",
+            rule="NEVER store plaintext passwords in config",
+            implication=None,
+        )
+        score = _compute_extraction_confidence(candidate)
+        # base=0.8, title>20 +0.05, has rule +0.05 = 0.9
+        self.assertGreaterEqual(score, 0.85)
+
+    def test_confidence_warning_keyword(self):
+        """extraction_reason containing 'warning' -> base 0.75."""
+        candidate = self._make_candidate(
+            suggested_type="risk",
+            extraction_reason="Explicit WARNING/RISK: marker",
+            implication="Could cause OOM",
+        )
+        score = _compute_extraction_confidence(candidate)
+        # base=0.75, title>20 +0.05, no rule but has implication -> no -0.15
+        self.assertGreaterEqual(score, 0.7)
+        self.assertLess(score, 0.9)
+
+    def test_confidence_error_fix(self):
+        """extraction_reason containing 'error' and 'fix' -> base 0.7."""
+        candidate = self._make_candidate(
+            extraction_reason="Error/Fix pattern",
+            implication="Added null check",
+        )
+        score = _compute_extraction_confidence(candidate)
+        # base=0.7, title>20 +0.05, no rule but has implication -> no -0.15
+        self.assertGreaterEqual(score, 0.65)
+        self.assertLess(score, 0.85)
+
+    def test_confidence_unknown_pattern(self):
+        """extraction_reason with no recognized keywords -> base 0.6."""
+        candidate = self._make_candidate(
+            extraction_reason="some random unrecognized text",
+            implication="Something",
+        )
+        score = _compute_extraction_confidence(candidate)
+        # base=0.6, title>20 +0.05 = 0.65
+        self.assertGreaterEqual(score, 0.55)
+        self.assertLess(score, 0.75)
+
+    def test_confidence_title_bonus(self):
+        """Title > 20 chars adds +0.05 compared to title <= 20 chars."""
+        long_title_candidate = self._make_candidate(
+            title="A very long title that exceeds twenty characters",
+            content=["A very long title that exceeds twenty characters", "Extra"],
+            extraction_reason="Explicit LESSON: marker",
+            implication="Important",
+        )
+        short_title_candidate = self._make_candidate(
+            title="Short title here!!!!",  # exactly 20 chars
+            content=["Short title here!!!!", "Extra"],
+            extraction_reason="Explicit LESSON: marker",
+            implication="Important",
+        )
+        long_score = _compute_extraction_confidence(long_title_candidate)
+        short_score = _compute_extraction_confidence(short_title_candidate)
+        # Long title gets +0.05 bonus; short title gets -0.05 penalty
+        self.assertGreater(long_score, short_score)
+
+    def test_confidence_rule_bonus(self):
+        """Having a rule adds +0.05 compared to not having one."""
+        with_rule = self._make_candidate(
+            extraction_reason="Explicit LESSON: marker",
+            rule="MUST always close connections",
+            implication="Connections leak",
+        )
+        without_rule = self._make_candidate(
+            extraction_reason="Explicit LESSON: marker",
+            rule=None,
+            implication="Connections leak",
+        )
+        score_with = _compute_extraction_confidence(with_rule)
+        score_without = _compute_extraction_confidence(without_rule)
+        self.assertGreater(score_with, score_without)
+
+    def test_confidence_capped_at_1(self):
+        """Max score caps at 1.0 even with all bonuses."""
+        candidate = self._make_candidate(
+            title="A very detailed and specific lesson title for maximum score",
+            content=["A very detailed and specific lesson title for maximum score", "Extra detail"],
+            extraction_reason="Explicit LESSON: marker",
+            rule="MUST always do this critical thing",
+            implication="Everything breaks otherwise",
+        )
+        score = _compute_extraction_confidence(candidate)
+        self.assertLessEqual(score, 1.0)
+
+
+# ===========================================================================
 # Test: Quality gate and confidence penalties
 
 

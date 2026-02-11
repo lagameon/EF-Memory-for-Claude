@@ -4,6 +4,55 @@ All notable changes to EF Memory for Claude will be documented in this file.
 
 ---
 
+## 2026-02-11 — V3.2 Phase 2: Security Hardening, Test Coverage, Robustness
+
+### 11 improvements across I/O performance, self-heal, error handling, test coverage, and startup architecture
+
+**PERF: events_io.py byte-offset mode no longer re-reads entire file**
+When using `byte_offset > 0` (incremental sync), the function no longer seeks back to position 0 to count total lines. This eliminates an O(n) full-file scan on every sync operation.
+
+**TEST: Comprehensive events_io.py test coverage (18 tests)**
+New `test_events_io.py` covering: empty/missing files, latest-wins semantics, start_line skipping, track_lines metadata, byte-offset incremental sync, invalid JSON handling, blank lines, missing IDs, OSError recovery, and large file line counting.
+
+**SELF-HEAL: vectordb.py schema versioning infrastructure**
+Added `SCHEMA_VERSION = 1` constant and `PRAGMA user_version` tracking. `ensure_schema()` now checks schema version on open, calls `_migrate()` framework for future upgrades, and warns when database is newer than code. `stats()` includes `schema_version`.
+
+**TEST: _compute_extraction_confidence() full coverage (10 tests)**
+All 7+ scoring branches tested: lesson/decision/constraint markers (0.9), must/never/always (0.8), warning/risk (0.75), error/fix (0.7), unknown (0.6), title length bonus, rule bonus, score capping at 1.0.
+
+**LOGIC: Evolution verification boost thresholds now configurable**
+`evolution.py` 30/90 day hardcoded thresholds replaced with `evo_config.verification_boost.{full_boost_days, partial_boost_days, partial_boost_value}` (defaults preserved).
+
+**ERROR: 12 silent except:pass replaced with logging**
+All hooks (stop_harvest, plan_start, pre_edit_search) and auto_sync.py now log warnings on config load failure, scan failure, compaction failure, draft check failure, and session recovery failure. Search exceptions use logger.debug (normal when no events.jsonl).
+
+**SIMPLIFY: check_startup() decomposed into 6 focused functions**
+134-line monolith split into: `_check_drafts()`, `_load_and_count()`, `_check_compaction()`, `_check_version()`, `_check_staleness_and_sources()`, `_check_session_recovery()`. Pure mechanical extraction, behavior unchanged.
+
+**SECURITY: stdin size validation in all hooks (10MB limit)**
+`stop_harvest.py`, `plan_start.py`, `pre_edit_search.py` now cap stdin reads at 10MB, preventing potential DoS from oversized hook input.
+
+**SECURITY: Atomic JSON writes in init.py**
+`_stamp_efm_version()`, hooks.json, and settings.local.json writes now use `tempfile.mkstemp() + os.replace()` pattern. Crash during write cannot corrupt existing files.
+
+**SELF-HEAL: Compaction audit logging for corrupted JSON**
+`compaction.py` now logs warnings for each corrupted JSON line skipped, with line number and error details. Summary count logged after compaction.
+
+**Modified files (12):**
+- `.memory/lib/events_io.py` — byte-offset total_lines optimization
+- `.memory/lib/vectordb.py` — SCHEMA_VERSION, PRAGMA user_version, _migrate framework
+- `.memory/lib/evolution.py` — Configurable verification boost thresholds
+- `.memory/lib/auto_sync.py` — check_startup decomposition, error logging
+- `.memory/lib/init.py` — _atomic_write_json helper, atomic writes for config/hooks/settings
+- `.memory/lib/compaction.py` — Corrupted JSON audit logging
+- `.memory/hooks/stop_harvest.py` — Error logging, stdin size limit
+- `.memory/hooks/plan_start.py` — Error logging, stdin size limit
+- `.memory/hooks/pre_edit_search.py` — Error logging, stdin size limit
+
+**Test count: 824 → 871** (+47 tests: 18 events_io + 10 confidence + 6 vectordb + 4 evolution + 4 auto_sync + 3 init + 2 compaction)
+
+---
+
 ## 2026-02-11 — V3.2: Critical Bug Fixes, Performance, Intelligence
 
 ### 10 fixes across hooks, pipeline, reasoning, compaction, evolution, and presets

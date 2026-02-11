@@ -23,7 +23,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from datetime import datetime, timezone
 
@@ -458,26 +458,8 @@ def _count_candidate_types(candidates) -> dict:
 # Startup health check
 # ---------------------------------------------------------------------------
 
-def check_startup(
-    events_path: Path,
-    drafts_dir: Path,
-    project_root: Path,
-    config: dict,
-) -> StartupReport:
-    """
-    Lightweight startup health check. Must be fast (<100ms).
-
-    Checks:
-    1. Count pending drafts
-    2. Count stale entries (>threshold days)
-    3. Spot-check source file existence on a sample of entries
-    4. Detect active working memory session (session recovery)
-    5. Format startup hint string
-    """
-    report = StartupReport()
-    start_time = time.monotonic()
-
-    # 1. Auto-expire stale drafts, then count remaining
+def _check_drafts(report: StartupReport, drafts_dir: Path, config: dict) -> None:
+    """Check and expire stale drafts."""
     try:
         v3_config_drafts = config.get("v3", {})
         expire_days = v3_config_drafts.get("draft_auto_expire_days", 7)
@@ -500,19 +482,24 @@ def check_startup(
                     report.oldest_draft_age_days = (now - ts).days
                 except (ValueError, TypeError):
                     pass
-    except Exception:
+    except Exception as e:
+        logger.warning("Draft check failed: %s", e)
         report.pending_drafts = 0
 
-    # 2. Load entries and count stale (single file read)
+
+def _load_and_count(events_path: Path) -> Tuple[Dict[str, dict], int]:
+    """Load entries and return (active_entries, total_lines)."""
     from .events_io import load_events_latest_wins as _load_events_full
     entries, total_lines, _end_offset = _load_events_full(events_path)
     active_entries = {
         eid: e for eid, e in entries.items()
         if not e.get("deprecated", False)
     }
-    report.total_entries = len(active_entries)
+    return active_entries, total_lines
 
-    # Compaction stats — uses total_lines from the single read above
+
+def _check_compaction(report: StartupReport, active_entries: dict, total_lines: int, config: dict) -> None:
+    """Calculate compaction stats."""
     try:
         compact_threshold = config.get("compaction", {}).get(
             "auto_suggest_threshold", 2.0
@@ -524,10 +511,12 @@ def check_startup(
         elif total_lines > 0:
             report.waste_ratio = float(total_lines)
         report.compaction_suggested = report.waste_ratio >= compact_threshold
-    except Exception:
-        pass  # Compaction stats unavailable — skip silently
+    except Exception as e:
+        logger.warning("Compaction stats failed: %s", e)
 
-    # Version check
+
+def _check_version(report: StartupReport, config: dict) -> None:
+    """Check EFM version mismatch."""
     try:
         from .config_presets import EFM_VERSION
         report.efm_version_current = EFM_VERSION
@@ -536,9 +525,12 @@ def check_startup(
             report.update_available = True
         elif not report.efm_version_installed:
             report.update_available = True  # No version stamp = needs upgrade
-    except ImportError:
-        pass
+    except ImportError as e:
+        logger.debug("Version check unavailable: %s", e)
 
+
+def _check_staleness_and_sources(report: StartupReport, active_entries: dict, project_root: Path, config: dict) -> None:
+    """Check staleness and source file existence."""
     threshold = config.get("verify", {}).get("staleness_threshold_days", 90)
     report.staleness_threshold_days = threshold
     for entry in active_entries.values():
@@ -546,7 +538,7 @@ def check_startup(
         if staleness.stale:
             report.stale_entries += 1
 
-    # 3. Spot-check source file existence (fast, no git)
+    # Spot-check source file existence (fast, no git)
     sample_size = config.get("automation", {}).get(
         "startup_source_sample_size", 10
     )
@@ -569,7 +561,9 @@ def check_startup(
 
     report.source_warnings = source_issues
 
-    # 4. Session recovery — detect active working memory session
+
+def _check_session_recovery(report: StartupReport, project_root: Path, config: dict) -> None:
+    """Detect active working memory session."""
     v3_config = config.get("v3", {})
     if v3_config.get("session_recovery", True):
         try:
@@ -585,12 +579,37 @@ def check_startup(
                 report.active_session_phases = (
                     f"{wm_status.phases_done}/{wm_status.phases_total} done"
                 )
-        except Exception:
-            pass  # Working memory module not available — skip silently
+        except Exception as e:
+            logger.warning("Session recovery check failed: %s", e)
 
-    # 5. Format hint (include pipeline state diagnostics)
+
+def check_startup(
+    events_path: Path,
+    drafts_dir: Path,
+    project_root: Path,
+    config: dict,
+) -> StartupReport:
+    """
+    Lightweight startup health check. Must be fast (<100ms).
+
+    Checks:
+    1. Count pending drafts
+    2. Count stale entries (>threshold days)
+    3. Spot-check source file existence on a sample of entries
+    4. Detect active working memory session (session recovery)
+    5. Format startup hint string
+    """
+    report = StartupReport()
+    start_time = time.monotonic()
+
+    _check_drafts(report, drafts_dir, config)
+    active_entries, total_lines = _load_and_count(events_path)
+    report.total_entries = len(active_entries)
+    _check_compaction(report, active_entries, total_lines, config)
+    _check_version(report, config)
+    _check_staleness_and_sources(report, active_entries, project_root, config)
+    _check_session_recovery(report, project_root, config)
     report.hint = _format_hint(report, events_path.parent)
-
     report.duration_ms = (time.monotonic() - start_time) * 1000
     return report
 

@@ -23,6 +23,8 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger("efm.vectordb")
 
+SCHEMA_VERSION = 1
+
 
 # ---------------------------------------------------------------------------
 # Vector math (pure Python)
@@ -111,8 +113,21 @@ class VectorDB:
             raise RuntimeError("Database not open. Call open() first.")
 
     def ensure_schema(self) -> None:
-        """Create tables if they don't exist."""
+        """Create tables if they don't exist, with schema version tracking."""
         self._require_conn()
+
+        # Check current schema version
+        current_version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+
+        if current_version > SCHEMA_VERSION:
+            logger.warning(
+                "Database schema version %d is newer than supported version %d. "
+                "Some features may not work correctly.",
+                current_version, SCHEMA_VERSION,
+            )
+
+        if current_version < SCHEMA_VERSION:
+            self._migrate(current_version)
 
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS vectors (
@@ -156,7 +171,18 @@ class VectorDB:
             )
         """)
 
+        # Stamp the schema version
+        self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
         self._conn.commit()
+
+    def _migrate(self, from_version: int) -> None:
+        """Run schema migrations from from_version to SCHEMA_VERSION.
+
+        Future migrations go here, keyed by version number.
+        """
+        # Future migrations go here
+        pass
 
     # --- Batch transaction support ---
 
@@ -407,6 +433,8 @@ class VectorDB:
 
         cursor = self.get_sync_cursor()
 
+        schema_version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+
         return {
             "vectors_total": total,
             "vectors_active": active,
@@ -414,4 +442,5 @@ class VectorDB:
             "fts_entries": fts_count,
             "fts5_available": self._fts5_available,
             "sync_cursor": cursor,
+            "schema_version": schema_version,
         }

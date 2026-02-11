@@ -21,6 +21,10 @@ from lib.auto_sync import (
     PipelineReport,
     StartupReport,
     StepResult,
+    _check_compaction,
+    _check_drafts,
+    _check_session_recovery,
+    _check_version,
     _format_hint,
     check_startup,
     run_pipeline,
@@ -835,6 +839,54 @@ class TestSessionRecoveryControlFlow(unittest.TestCase):
         )
         self.assertTrue(report.active_session)
         self.assertIn("Implement feature X", report.active_session_task)
+
+
+# ---------------------------------------------------------------------------
+# TestCheckStartupDecomposition — C2: decomposed helper functions
+# ---------------------------------------------------------------------------
+
+class TestCheckStartupDecomposition(unittest.TestCase):
+
+    def test_check_drafts_handles_exception(self):
+        """_check_drafts with invalid dir doesn't crash."""
+        from lib.auto_sync import _check_drafts, StartupReport
+        report = StartupReport()
+        # Pass a non-existent directory — should not raise
+        invalid_dir = Path("/nonexistent/drafts/path")
+        _check_drafts(report, invalid_dir, {})
+        # After exception, pending_drafts should be 0
+        self.assertEqual(report.pending_drafts, 0)
+
+    def test_check_compaction_zero_active(self):
+        """Zero active entries, non-zero total_lines."""
+        from lib.auto_sync import _check_compaction, StartupReport
+        report = StartupReport()
+        # 5 total lines, 0 active entries
+        _check_compaction(report, {}, 5, {"compaction": {"auto_suggest_threshold": 2.0}})
+        self.assertEqual(report.waste_ratio, 5.0)
+        self.assertTrue(report.compaction_suggested)
+
+    def test_check_version_mismatch_detected(self):
+        """Config version != current version triggers update_available."""
+        from lib.auto_sync import _check_version, StartupReport
+        from lib.config_presets import EFM_VERSION
+        report = StartupReport()
+        config = {"efm_version": "0.0.1"}
+        _check_version(report, config)
+        if EFM_VERSION != "0.0.1":
+            self.assertTrue(report.update_available)
+            self.assertEqual(report.efm_version_installed, "0.0.1")
+            self.assertEqual(report.efm_version_current, EFM_VERSION)
+
+    def test_check_session_recovery_config_disabled(self):
+        """session_recovery=False skips check."""
+        from lib.auto_sync import _check_session_recovery, StartupReport
+        report = StartupReport()
+        config = {"v3": {"session_recovery": False}}
+        tmpdir = Path(tempfile.mkdtemp())
+        # Should not raise and should not set active_session
+        _check_session_recovery(report, tmpdir, config)
+        self.assertFalse(report.active_session)
 
 
 if __name__ == "__main__":

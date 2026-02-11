@@ -18,17 +18,26 @@ Checks stop_hook_active to prevent infinite loops.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("efm.stop_harvest")
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _MEMORY_DIR = _SCRIPT_DIR.parent
 _PROJECT_ROOT = _MEMORY_DIR.parent
 
 
+MAX_STDIN_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
 def main():
     try:
-        input_data = json.loads(sys.stdin.read())
+        raw_input = sys.stdin.read(MAX_STDIN_SIZE + 1)
+        if len(raw_input) > MAX_STDIN_SIZE:
+            sys.exit(0)
+        input_data = json.loads(raw_input)
     except (json.JSONDecodeError, OSError):
         sys.exit(0)
 
@@ -42,7 +51,8 @@ def main():
         sys.path.insert(0, str(_MEMORY_DIR))
         from lib.config_presets import load_config
         config = load_config(config_path)
-    except Exception:
+    except Exception as e:
+        logger.warning("Config load failed, using defaults: %s", e)
         config = {}
 
     v3_config = config.get("v3", {})
@@ -87,8 +97,8 @@ def main():
                     )
                 }
                 print(json.dumps(result))
-        except Exception:
-            pass  # Never block stopping on scan failure
+        except Exception as e:
+            logger.warning("Transcript scan failed: %s", e)
 
         sys.exit(0)
 
@@ -188,8 +198,8 @@ def main():
                     f"{compact_report.lines_before} → {compact_report.lines_after} lines, "
                     f"{compact_report.lines_archived} archived to {compact_report.quarters_touched}"
                 )
-    except Exception:
-        pass  # Never block stopping on compact failure
+    except Exception as e:
+        logger.warning("Auto-compact failed: %s", e)
 
     # --- Unified output: single JSON to stdout ---
     if decision:

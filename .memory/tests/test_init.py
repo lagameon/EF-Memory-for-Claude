@@ -22,6 +22,7 @@ from lib.init import (
     InitReport,
     _EFM_SECTION_END,
     _EFM_SECTION_START,
+    _atomic_write_json,
     _count_entries,
     _replace_efm_section,
     generate_claude_md,
@@ -949,6 +950,54 @@ class TestRunUpgrade(unittest.TestCase):
         content = claude_md.read_text()
         self.assertIn(_EFM_SECTION_START, content)
         self.assertIn("My Project", content)
+
+
+# ===========================================================================
+# Test: _atomic_write_json (C4)
+# ===========================================================================
+
+class TestAtomicWriteJson(unittest.TestCase):
+
+    def test_atomic_write_creates_file(self):
+        """Writes valid JSON atomically to a new file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test.json"
+            data = {"key": "value", "number": 42}
+            _atomic_write_json(path, data)
+            self.assertTrue(path.exists())
+            loaded = json.loads(path.read_text())
+            self.assertEqual(loaded["key"], "value")
+            self.assertEqual(loaded["number"], 42)
+
+    def test_atomic_write_overwrites_existing(self):
+        """Existing file is updated atomically."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test.json"
+            path.write_text('{"old": true}\n')
+            _atomic_write_json(path, {"new": True})
+            loaded = json.loads(path.read_text())
+            self.assertTrue(loaded["new"])
+            self.assertNotIn("old", loaded)
+
+    def test_atomic_write_no_corruption_on_error(self):
+        """If write fails, original file is preserved."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test.json"
+            original_data = {"preserved": True}
+            path.write_text(json.dumps(original_data) + "\n")
+
+            # Create an object that will fail JSON serialization
+            class BadObj:
+                pass
+
+            try:
+                _atomic_write_json(path, {"bad": BadObj()})
+            except (TypeError, Exception):
+                pass  # Expected to fail
+
+            # Original should still be intact
+            loaded = json.loads(path.read_text())
+            self.assertTrue(loaded["preserved"])
 
 
 if __name__ == "__main__":

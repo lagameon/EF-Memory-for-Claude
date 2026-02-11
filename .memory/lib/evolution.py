@@ -284,10 +284,16 @@ def calculate_confidence(
             if verified_dt.tzinfo is None:
                 verified_dt = verified_dt.replace(tzinfo=timezone.utc)
             days_since_verified = max(0, (datetime.now(timezone.utc) - verified_dt).days)
-            if days_since_verified <= 30:
+
+            boost_config = evo_config.get("verification_boost", {})
+            full_boost_days = boost_config.get("full_boost_days", 30)
+            partial_boost_days = boost_config.get("partial_boost_days", 90)
+            partial_boost_value = boost_config.get("partial_boost_value", 0.67)
+
+            if days_since_verified <= full_boost_days:
                 verification_boost = 1.0
-            elif days_since_verified <= 90:
-                verification_boost = 0.67
+            elif days_since_verified <= partial_boost_days:
+                verification_boost = partial_boost_value
             else:
                 verification_boost = 0.0
         except Exception:

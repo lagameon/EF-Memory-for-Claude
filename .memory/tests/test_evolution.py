@@ -989,5 +989,81 @@ class TestEntryIdsHash(unittest.TestCase):
         self.assertEqual(hash1, hash2)
 
 
+# ---------------------------------------------------------------------------
+# TestVerificationBoostConfig
+# ---------------------------------------------------------------------------
+
+class TestVerificationBoostConfig(unittest.TestCase):
+    """Test configurable verification boost thresholds."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.events_path = self.tmpdir / "events.jsonl"
+        self.events_path.write_text("")
+        self.project_root = self.tmpdir
+
+    def test_verification_boost_default_30_days(self):
+        """Default behavior: verified within 30 days -> boost 1.0."""
+        config = _make_config()
+        entry = _make_entry(
+            created_at=_days_ago_iso(60),
+            last_verified=_days_ago_iso(10),
+            source=["PR #123"],
+        )
+        cs = calculate_confidence(entry, self.events_path, self.project_root, config)
+        self.assertEqual(cs.breakdown.verification_boost, 1.0)
+
+    def test_verification_boost_custom_full_days(self):
+        """Custom full_boost_days=15: verified 20 days ago should NOT get full boost."""
+        config = _make_config()
+        config["evolution"]["verification_boost"] = {
+            "full_boost_days": 15,
+            "partial_boost_days": 90,
+            "partial_boost_value": 0.67,
+        }
+        entry = _make_entry(
+            created_at=_days_ago_iso(60),
+            last_verified=_days_ago_iso(20),
+            source=["PR #123"],
+        )
+        cs = calculate_confidence(entry, self.events_path, self.project_root, config)
+        # 20 days > 15 (full_boost_days) but <= 90 (partial_boost_days)
+        self.assertAlmostEqual(cs.breakdown.verification_boost, 0.67, places=2)
+
+    def test_verification_boost_custom_partial_days(self):
+        """Custom partial_boost_days=60: verified 75 days ago -> boost 0.0."""
+        config = _make_config()
+        config["evolution"]["verification_boost"] = {
+            "full_boost_days": 30,
+            "partial_boost_days": 60,
+            "partial_boost_value": 0.67,
+        }
+        entry = _make_entry(
+            created_at=_days_ago_iso(120),
+            last_verified=_days_ago_iso(75),
+            source=["PR #123"],
+        )
+        cs = calculate_confidence(entry, self.events_path, self.project_root, config)
+        # 75 days > 60 (partial_boost_days) -> no boost
+        self.assertEqual(cs.breakdown.verification_boost, 0.0)
+
+    def test_verification_boost_custom_partial_value(self):
+        """Custom partial_boost_value=0.5: verified 60 days ago -> boost 0.5."""
+        config = _make_config()
+        config["evolution"]["verification_boost"] = {
+            "full_boost_days": 30,
+            "partial_boost_days": 90,
+            "partial_boost_value": 0.5,
+        }
+        entry = _make_entry(
+            created_at=_days_ago_iso(120),
+            last_verified=_days_ago_iso(60),
+            source=["PR #123"],
+        )
+        cs = calculate_confidence(entry, self.events_path, self.project_root, config)
+        # 60 days > 30 but <= 90 -> partial_boost_value = 0.5
+        self.assertAlmostEqual(cs.breakdown.verification_boost, 0.5, places=2)
+
+
 if __name__ == "__main__":
     unittest.main()

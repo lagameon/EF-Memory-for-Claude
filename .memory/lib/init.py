@@ -18,6 +18,7 @@ No external dependencies — pure Python stdlib.
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -421,6 +422,28 @@ def _count_entries(events_path: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Atomic write helper
+# ---------------------------------------------------------------------------
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write JSON atomically via temp file + os.replace."""
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=str(path.parent), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w") as tmp_f:
+            tmp_f.write(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Version stamping
 # ---------------------------------------------------------------------------
 
@@ -440,7 +463,7 @@ def _stamp_efm_version(config_path: Path) -> None:
         else:
             raw = {}
         raw["efm_version"] = EFM_VERSION
-        config_path.write_text(json.dumps(raw, indent=2) + "\n")
+        _atomic_write_json(config_path, raw)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Could not stamp efm_version: %s", exc)
 
@@ -612,12 +635,12 @@ def _handle_hooks_json(
             logger.info("hooks.json already has EF Memory hook, skipping")
             return
         if not dry_run:
-            hooks_path.write_text(json.dumps(merged, indent=2) + "\n")
+            _atomic_write_json(hooks_path, merged)
         report.files_merged.append(rel_path)
         logger.info("Merged EF Memory hook into hooks.json")
     else:
         if not dry_run:
-            hooks_path.write_text(json.dumps(merged, indent=2) + "\n")
+            _atomic_write_json(hooks_path, merged)
         report.files_created.append(rel_path)
         logger.info("Created hooks.json")
 
@@ -647,12 +670,12 @@ def _handle_settings_json(
             logger.info("settings.local.json already has EF Memory permissions, skipping")
             return
         if not dry_run:
-            settings_path.write_text(json.dumps(merged, indent=2) + "\n")
+            _atomic_write_json(settings_path, merged)
         report.files_merged.append(rel_path)
         logger.info("Merged EF Memory permissions into settings.local.json")
     else:
         if not dry_run:
-            settings_path.write_text(json.dumps(merged, indent=2) + "\n")
+            _atomic_write_json(settings_path, merged)
         report.files_created.append(rel_path)
         logger.info("Created settings.local.json")
 
